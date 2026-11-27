@@ -90,6 +90,17 @@ see/edit API keys. TronGrid nodes for each network are built in.
 
 Nodes are stored in `nodes.json` next to `keys.json` (git-ignored because it holds API keys).
 
+**API keys** can be sent as a header (default `TRON-PRO-API-KEY`, TronGrid style; header name is configurable) or
+in the URL (`API key in: url`): appended as `<full host>/<key>` (GetBlock, Chainstack, …) or placed wherever `{key}`
+appears in the full host, e.g. `https://rpc.ankr.com/premium-http/tron/{key}`.
+
+**Rate limits**: public TronGrid mainnet without a key allows ~3 requests/s and suspends the caller for 5 s when
+exceeded. All requests go through a per-node queue: keyless TronGrid mainnet is paced to one request every 400 ms,
+keyless TronGrid testnets 3 in parallel, everything else 8 in parallel. On HTTP 429/403/503 the node's queue
+pauses for the time the server asks for and the request is retried (up to 4 times). The app shows a notice when
+you are on keyless mainnet TronGrid; get a free key at trongrid.io and add it under *nodes* (or set
+`TRONGRID_API_KEY`).
+
 ## Permissions: operations bitmask
 
 Active permissions have an `operations` field: a 32-byte hex mask of allowed contract types. In the Permissions tab you

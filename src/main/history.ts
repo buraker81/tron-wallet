@@ -4,19 +4,18 @@
  * built-in TronGrid host of the same network.
  */
 import { TronWeb } from 'tronweb'
-import { NETWORKS } from './networks'
-import { activeNode, nodeHeaders } from './nodes'
+import { activeNode, builtinNode, nodeHeaders, nodePolicy, nodeQueueKey, nodeUrl } from './nodes'
+import { checkedFetch, throttled } from './ratelimit'
 import { SUN, getNetwork, toBase58, tw } from './client'
-import type { HistoryItem, HistoryPage, TxReceipt } from '../shared/types'
+import type { HistoryItem, HistoryPage, NodeConfig, TxReceipt } from '../shared/types'
 
 const PAGE = 30
 
-function source(): { base: string; headers: Record<string, string>; fallback: boolean } {
+function source(): { node: NodeConfig; fallback: boolean } {
   const node = activeNode(getNetwork())
-  const isGrid = /(^|\.)trongrid\.io$/i.test(new URL(node.fullHost).hostname)
-  return isGrid
-    ? { base: node.fullHost, headers: nodeHeaders(node), fallback: false }
-    : { base: NETWORKS[getNetwork()].fullHost, headers: {}, fallback: true }
+  const isGrid = /(^|\.)trongrid\.io$/i.test(new URL(node.fullHost.replace('{key}', 'k')).hostname)
+  // non-TronGrid nodes have no v1 API: use the built-in TronGrid node (with its saved key, if any)
+  return isGrid ? { node, fallback: false } : { node: builtinNode(getNetwork()), fallback: true }
 }
 
 const dir = (me: string, from?: string, to?: string): HistoryItem['direction'] =>
@@ -82,18 +81,21 @@ function fromTrc20(me: string, d: any): HistoryItem {
 
 export async function history(address: string, kind: 'all' | 'trc20', fingerprint?: string): Promise<HistoryPage> {
   if (!TronWeb.isAddress(address)) throw new Error('Invalid address')
-  const { base, headers, fallback } = source()
+  const { node, fallback } = source()
+  const base = nodeUrl(node)
   const url = new URL(`${base}/v1/accounts/${address}/transactions${kind === 'trc20' ? '/trc20' : ''}`)
   url.searchParams.set('limit', String(PAGE))
   if (fingerprint) url.searchParams.set('fingerprint', fingerprint)
-  const res = await fetch(url, { headers, signal: AbortSignal.timeout(15000) })
+  const res = await throttled(nodeQueueKey(node), nodePolicy(node), () =>
+    checkedFetch(url, { headers: nodeHeaders(node), signal: AbortSignal.timeout(15000) })
+  )
   if (!res.ok) throw new Error(`History request failed: HTTP ${res.status}`)
   const body: any = await res.json()
   if (body?.success === false) throw new Error(body?.error ?? 'History request failed')
   const items = (body.data ?? [])
     .filter((d: any) => kind === 'trc20' || d.raw_data) // skip internal txs in the mixed feed
     .map((d: any) => (kind === 'trc20' ? fromTrc20(address, d) : fromTx(address, d)))
-  return { items, next: body.meta?.fingerprint, source: new URL(base).host, fallback }
+  return { items, next: body.meta?.fingerprint, source: new URL(node.fullHost.replace('{key}', 'k')).host, fallback }
 }
 
 /** Receipt of a mined tx (fee, energy, bandwidth). found=false while it is not in a block yet. */

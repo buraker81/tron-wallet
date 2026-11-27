@@ -208,6 +208,11 @@ export interface NodeConfig {
   network: NetworkId
   fullHost: string
   apiKey?: string
+  /**
+   * Where the key goes. 'header' (default): sent as `apiKeyHeader`.
+   * 'url': replaces `{key}` in fullHost, or is appended as `/<key>` (GetBlock, Chainstack, Ankr style).
+   */
+  apiKeyIn?: 'header' | 'url'
   /** Header used to send apiKey. Defaults to TRON-PRO-API-KEY (TronGrid). */
   apiKeyHeader?: string
   builtin?: boolean
@@ -217,6 +222,8 @@ export interface NodeState {
   nodes: NodeConfig[]
   selected: Record<NetworkId, string>
   path: string
+  /** TRONGRID_API_KEY env var is set (used by built-in TronGrid nodes without a saved key) */
+  envKey: boolean
 }
 
 export interface NodeTestResult {

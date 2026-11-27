@@ -100,6 +100,7 @@ export function NodesModal({
                       <td className="mono">{n.fullHost}</td>
                       <td className="mono">
                         {reveal[n.id] ? n.apiKey || '—' : mask(n.apiKey)}{' '}
+                        {n.apiKey && <span className="muted">({n.apiKeyIn === 'url' ? 'url' : 'header'})</span>}{' '}
                         {n.apiKey && (
                           <button className="link" onClick={() => setReveal((r) => ({ ...r, [n.id]: !r[n.id] }))}>
                             {reveal[n.id] ? 'Hide' : 'Show'}
@@ -150,7 +151,7 @@ export function NodesModal({
                 </select>
               </Field>
             </div>
-            <Field label="Full host (HTTP API, e.g. http://127.0.0.1:8090)">
+            <Field label="Full host (HTTP API, e.g. http://127.0.0.1:8090 or https://go.getblock.io/{key})">
               <input
                 className="mono"
                 value={editing.fullHost}
@@ -167,14 +168,32 @@ export function NodesModal({
                   onChange={(e) => setEditing({ ...editing, apiKey: e.target.value })}
                 />
               </Field>
-              <Field label="API key header">
-                <input
-                  className="mono"
-                  value={editing.apiKeyHeader ?? ''}
-                  placeholder="TRON-PRO-API-KEY"
-                  onChange={(e) => setEditing({ ...editing, apiKeyHeader: e.target.value })}
-                />
+              <Field label="API key in">
+                <select
+                  value={editing.apiKeyIn ?? 'header'}
+                  onChange={(e) => setEditing({ ...editing, apiKeyIn: e.target.value as 'header' | 'url' })}
+                >
+                  <option value="header">header</option>
+                  <option value="url">url</option>
+                </select>
               </Field>
+              {(editing.apiKeyIn ?? 'header') === 'header' && (
+                <Field label="header name">
+                  <input
+                    className="mono"
+                    value={editing.apiKeyHeader ?? ''}
+                    placeholder="TRON-PRO-API-KEY"
+                    onChange={(e) => setEditing({ ...editing, apiKeyHeader: e.target.value })}
+                  />
+                </Field>
+              )}
+            </div>
+            <div className="muted small">
+              {(editing.apiKeyIn ?? 'header') === 'header'
+                ? `Sent as the ${editing.apiKeyHeader || 'TRON-PRO-API-KEY'} header on every request (TronGrid style).`
+                : editing.fullHost.includes('{key}')
+                  ? 'The key replaces {key} in the full host.'
+                  : 'The key is appended to the full host: <full host>/<key>/wallet/... Put {key} in the full host to place it elsewhere.'}
             </div>
             <div className="row" style={{ alignItems: 'center' }}>
               <button

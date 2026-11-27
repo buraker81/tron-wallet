@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Balances, NetworkId, NodeState, PublicKey, TxReceipt, TxResult, VaultStatus } from '../../shared/types'
+import type { Balances, NetworkId, NodeConfig, NodeState, PublicKey, TxReceipt, TxResult, VaultStatus } from '../../shared/types'
 import { TxContext, fmt, short } from './ui'
 import { SendTrx, SendUsdt } from './components/Send'
 import { Stake } from './components/Stake'
@@ -28,6 +28,13 @@ interface LogEntry {
 }
 
 /** Runs a tx action with mainnet confirmation and logging. Resolves to the result, or undefined if cancelled/failed. */
+/** Mainnet TronGrid with no saved key and no env key: heavily rate limited. */
+const isKeylessPublicGrid = (n: NodeConfig, envKey?: boolean) =>
+  n.network === 'mainnet' &&
+  /(^|\.)trongrid\.io$/.test(new URL(n.fullHost.replace('{key}', 'k')).hostname) &&
+  !n.apiKey &&
+  !(n.builtin && envKey)
+
 export type RunTx = (label: string, fn: () => Promise<TxResult>) => Promise<TxResult | undefined>
 
 export default function App() {
@@ -93,18 +100,21 @@ export default function App() {
     })
   }, [syncKeys])
 
+  const [balanceErrors, setBalanceErrors] = useState<Record<string, string>>({})
+
+  /** Load balances for all keys. Each result is shown as soon as it arrives; failures are kept per address. */
   const refresh = useCallback(async (list?: PublicKey[]) => {
     const ks = list ?? (await loadKeys())
     setLoading(true)
-    const entries = await Promise.all(
+    setBalanceErrors({})
+    await Promise.all(
       ks.map((k) =>
         window.api
           .balances(k.address)
-          .then((b) => [k.address, b] as const)
-          .catch(() => null)
+          .then((b) => setBalances((cur) => ({ ...cur, [k.address]: b })))
+          .catch((e) => setBalanceErrors((cur) => ({ ...cur, [k.address]: e.message })))
       )
     )
-    setBalances(Object.fromEntries(entries.filter(Boolean) as [string, Balances][]))
     setLoading(false)
   }, [loadKeys])
 
@@ -202,6 +212,14 @@ export default function App() {
     <TxContext.Provider value={{ keys, from: selected, memoFee }}>
     <div className={`app ${network}`}>
       {network === 'mainnet' && <div className="mainnet-bar">mainnet: transactions are real</div>}
+      {activeNode && isKeylessPublicGrid(activeNode, nodes?.envKey) && (
+        <div className="notice-bar">
+          Public TronGrid without an API key allows ~3 requests/s, so requests are queued and loading is slow.{' '}
+          <button className="link" onClick={() => setShowNodes(true)}>
+            Add a free key from trongrid.io in nodes
+          </button>
+        </div>
+      )}
       <header>
         <span className="brand">tron-wallet</span>
         <nav className="seg">
@@ -281,6 +299,10 @@ export default function App() {
                         {fmt(b.trx, 2)} trx{b.usdt ? <> · {fmt(b.usdt, 2)} usdt</> : null}
                         {!b.activated && <> · inactive</>}
                       </>
+                    ) : balanceErrors[k.address] ? (
+                      <span className="error" title={balanceErrors[k.address]}>
+                        failed to load
+                      </span>
                     ) : (
                       '…'
                     )}
@@ -294,7 +316,13 @@ export default function App() {
         <main>
           {selected ? (
             <>
-              <BalancesPanel address={selected.address} id={selected.id} balances={bal} />
+              <BalancesPanel
+                address={selected.address}
+                id={selected.id}
+                balances={bal}
+                error={bal ? undefined : balanceErrors[selected.address]}
+                onRetry={() => refresh(keys)}
+              />
               <AccountActions
                 k={selected}
                 keys={keys}

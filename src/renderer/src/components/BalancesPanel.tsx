@@ -1,7 +1,13 @@
 import type { Balances } from '../../../shared/types'
 import { fmt, short } from '../ui'
 
-export function BalancesPanel({ id, address, balances: b }: { id: number; address: string; balances?: Balances }) {
+export function BalancesPanel({ id, address, balances: b, error, onRetry }: {
+  id: number
+  address: string
+  balances?: Balances
+  error?: string
+  onRetry?: () => void
+}) {
   const used = b?.votes.reduce((s, v) => s + v.count, 0) ?? 0
   return (
     <div className="account">
@@ -39,6 +45,15 @@ export function BalancesPanel({ id, address, balances: b }: { id: number; addres
             <Row k="votes" v={b.votes.map((v) => `${short(v.address)} ${fmt(v.count, 0)}`).join(', ')} />
           )}
         </dl>
+      ) : error ? (
+        <div className="load-error">
+          <span className="error">failed to load: {error}</span>
+          {onRetry && (
+            <button className="link" onClick={onRetry}>
+              retry
+            </button>
+          )}
+        </div>
       ) : (
         <div className="muted pad">loading…</div>
       )}

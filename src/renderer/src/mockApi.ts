@@ -52,6 +52,7 @@ const balances: Record<string, Balances> = {
 let network: NetworkId = 'shasta'
 let nodes: NodeState = {
   path: '/Users/you/projects/tron_wallet/nodes.json',
+  envKey: false,
   selected: { shasta: 'trongrid-shasta', nile: 'trongrid-nile', mainnet: 'trongrid-mainnet' },
   nodes: [
     { id: 'trongrid-shasta', name: 'TronGrid Shasta', network: 'shasta', fullHost: 'https://api.shasta.trongrid.io', apiKey: 'a1b2c3d4-0000-1111-2222-333344445555', builtin: true },
@@ -123,7 +124,10 @@ export function installMockApi() {
     testNode: (n: any) => wait(n.fullHost.includes('127.0.0.1') ? { ok: false, latencyMs: 4, error: 'fetch failed (ECONNREFUSED)' } : { ok: true, latencyMs: 284, block: 70484606 }, 500),
     getNetwork: () => wait(network),
     setNetwork: (n: NetworkId) => wait((network = n)),
-    balances: (a: string) => wait(balances[a] ?? bal(a, 0, 0, false)),
+    balances: (a: string) =>
+      network === 'mainnet' && a === fileKeys[1].address
+        ? Promise.reject(new Error('Rate limited by api.trongrid.io (HTTP 429). Add an API key for this node (nodes) or wait a moment.'))
+        : wait(balances[a] ?? bal(a, 0, 0, false)),
     listSRs: () =>
       wait(
         Array.from({ length: 24 }, (_, i) => ({

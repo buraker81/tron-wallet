@@ -30,7 +30,7 @@ export const NETWORKS: Record<NetworkId, Network> = {
     id: 'mainnet',
     label: 'Mainnet',
     fullHost: 'https://api.trongrid.io',
-    usdt: 'TR7NHqjeKQxGTCi8q8ZY4pxL8otSzgjLj6t',
+    usdt: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
     explorer: 'https://tronscan.org/#/transaction/'
   }
 }
