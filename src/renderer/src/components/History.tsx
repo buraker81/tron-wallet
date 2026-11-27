@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Balances, BalancePoint, HistoryItem, HistoryKind, NetworkId, PublicKey } from '../../../shared/types'
+import type { Balances, BalancePoint, HistoryData, HistoryItem, HistoryKind, NetworkId, PublicKey } from '../../../shared/types'
 import { fmt, short } from '../ui'
 import { Bars, LineChart } from './history/charts'
 import { FEE_PARTS, typeLabel, typeOrder, type FeeSplit } from '../../../shared/txtypes'
@@ -23,122 +23,77 @@ const ARROW: Record<HistoryItem['direction'], string> = { in: '←', out: '→',
 const when = (ms: number) =>
   new Date(ms).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })
 
-/** Stop loading after this many items per feed (keeps huge accounts usable). */
-const CAP = 5000
 const ROWS_STEP = 200
 
-interface Loaded {
-  items: HistoryItem[]
-  capped: boolean
-  source?: { host: string; fallback: boolean }
-  done: boolean
-  error?: string
-}
+/**
+ * History from the local SQLite cache: shows what is cached immediately, then syncs in the background
+ * (new txs + continue loading older ones) and refreshes as rows arrive.
+ */
+function useHistoryCache(address: string, network: NetworkId) {
+  const [data, setData] = useState<HistoryData>()
+  const [syncing, setSyncing] = useState(false)
+  const [added, setAdded] = useState({ new: 0, older: 0 })
+  const [error, setError] = useState<string>()
+  const current = useRef(`${network}:${address}`)
+  current.current = `${network}:${address}`
 
-// survives tab switches; cleared by "reload"
-const cache = new Map<string, Loaded>()
+  const load = async () => {
+    const key = `${network}:${address}`
+    const d = await window.api.historyData(address)
+    if (current.current === key) setData(d)
+  }
 
-const USDT_CAP = 20000
-const usdtCache = new Map<string, { items: HistoryItem[]; complete: boolean; oldest: number }>()
-
-/** Official USDT transfers since the range start (contract + time filtered on TronGrid), for the USDT balance chart. */
-function useUsdtTransfers(address: string, network: NetworkId, days: number, enabled: boolean, nonce: number) {
-  const key = `${network}:${address}:${days}:${nonce}`
-  const [state, setState] = useState<{ items: HistoryItem[]; complete: boolean; oldest: number; done: boolean; error?: string; count: number }>(
-    () => ({ ...(usdtCache.get(key) ?? { items: [], complete: false, oldest: Date.now() }), done: usdtCache.has(key), count: 0 })
-  )
-  useEffect(() => {
-    if (!enabled) return
-    const hit = usdtCache.get(key)
-    if (hit) {
-      setState({ ...hit, done: true, count: hit.items.length })
-      return
-    }
-    let alive = true
-    setState({ items: [], complete: false, oldest: Date.now(), done: false, count: 0 })
-    ;(async () => {
-      const since = Date.now() - days * 86_400_000
-      const items: HistoryItem[] = []
-      let next: string | undefined
-      try {
-        do {
-          const page = await window.api.history(address, 'trc20', next, { usdtOnly: true, since })
-          if (!alive) return
-          items.push(...page.items.filter((x) => x.isUsdt))
-          next = page.items.length ? page.next : undefined
-          setState((s) => ({ ...s, count: items.length }))
-        } while (next && items.length < USDT_CAP)
-        const res = { items, complete: !next, oldest: items.length ? Math.min(...items.map((x) => x.time)) : since }
-        usdtCache.set(key, res)
-        if (alive) setState({ ...res, done: true, count: items.length })
-      } catch (e: any) {
-        if (alive) setState({ items, complete: false, oldest: Date.now(), done: true, error: e.message, count: items.length })
+  const sync = async () => {
+    const key = `${network}:${address}`
+    setSyncing(true)
+    setError(undefined)
+    setAdded({ new: 0, older: 0 })
+    try {
+      await window.api.historySync(address)
+    } catch (e: any) {
+      if (current.current === key) setError(e.message)
+    } finally {
+      if (current.current === key) {
+        setSyncing(false)
+        await load()
       }
-    })()
-    return () => {
-      alive = false
     }
-  }, [key, enabled])
-  return state
-}
-
-/** Loads both TronGrid feeds page by page (200/page) up to CAP, reporting progress; cached per network + address. */
-function useHistory(address: string, network: NetworkId) {
-  const key = `${network}:${address}`
-  const [state, setState] = useState<Loaded>(() => cache.get(key) ?? { items: [], capped: false, done: false })
-  const [progress, setProgress] = useState(0)
-  const stop = useRef(false)
-  const [nonce, setNonce] = useState(0)
+  }
 
   useEffect(() => {
-    const cached = cache.get(key)
-    if (cached?.done) {
-      setState(cached)
-      return
-    }
-    stop.current = false
-    let alive = true
-    setState({ items: [], capped: false, done: false })
-    setProgress(0)
-    ;(async () => {
-      const feeds: Record<'all' | 'trc20', HistoryItem[]> = { all: [], trc20: [] }
-      let capped = false
-      let source: Loaded['source']
-      try {
-        for (const kind of ['all', 'trc20'] as const) {
-          let next: string | undefined
-          do {
-            const page = await window.api.history(address, kind, next)
-            if (!alive) return
-            source ??= { host: page.source, fallback: page.fallback }
-            feeds[kind].push(...page.items)
-            next = page.items.length ? page.next : undefined
-            setProgress(feeds.all.length + feeds.trc20.length)
-            if (feeds[kind].length >= CAP && next) capped = true
-          } while (next && !stop.current && feeds[kind].length < CAP)
-        }
-        const done: Loaded = { items: mergeFeeds(feeds.all, feeds.trc20), capped: capped || stop.current, source, done: true }
-        cache.set(key, done)
-        if (alive) setState(done)
-      } catch (e: any) {
-        if (!alive) return
-        // keep whatever loaded so far, so a rate limit late in the list still shows the rest
-        setState({ items: mergeFeeds(feeds.all, feeds.trc20), capped: true, source, done: true, error: e.message })
-      }
-    })()
+    setData(undefined)
+    load().then(sync)
+  }, [address, network])
+
+  // progress events: count rows and re-read the cache every ~2 s so new rows show up while syncing
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const off = window.api.onHistoryProgress((p) => {
+      if (p.address !== address || p.network !== network) return
+      setAdded((a) => ({ ...a, [p.phase]: Math.max(a[p.phase], p.added) }))
+      timer ??= setTimeout(() => {
+        timer = undefined
+        load()
+      }, 2000)
+    })
     return () => {
-      alive = false
+      off()
+      if (timer) clearTimeout(timer)
     }
-  }, [key, nonce])
+  }, [address, network])
 
   return {
-    ...state,
-    nonce,
-    progress,
-    stop: () => (stop.current = true),
-    reload: () => {
-      cache.delete(key)
-      setNonce((n) => n + 1)
+    data,
+    syncing,
+    added,
+    error,
+    sync,
+    stop: () => window.api.historyStop(address),
+    clear: async () => {
+      await window.api.historyClear(address)
+      setData(undefined)
+      await load()
+      await sync()
     }
   }
 }
@@ -149,7 +104,10 @@ export function History({ from, keys, network, balances }: {
   network: NetworkId
   balances?: Balances
 }) {
-  const h = useHistory(from.address, network)
+  const h = useHistoryCache(from.address, network)
+  const items = useMemo(() => (h.data ? mergeFeeds(h.data.all, h.data.tokens) : []), [h.data])
+  const allStatus = h.data?.status.find((x) => x.feed === 'all')
+  const usdtStatus = h.data?.status.find((x) => x.feed === 'usdt')
   const [range, setRange] = useState<RangeId>('90d')
   const [series, setSeries] = useState<'trx' | 'usdt'>('trx')
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS)
@@ -180,22 +138,22 @@ export function History({ from, keys, network, balances }: {
     () => new Map(keys.map((k) => [k.address, `#${k.id}${k.label ? ` ${k.label}` : ''}`])),
     [keys]
   )
-  const ranged = useMemo(() => inRange(h.items, days), [h.items, days])
+  const ranged = useMemo(() => inRange(items, days), [items, days])
   const counts = useMemo(() => kindCounts(ranged), [ranged])
   const filtered = useMemo(() => applyFilters(ranged, filters, labels), [ranged, filters, labels])
   const t = useMemo(() => totals(filtered), [filtered])
   const dayKeys = useMemo(() => dayList(days), [days])
   const buckets = useMemo(() => feeBuckets(filtered, dayKeys), [filtered, dayKeys])
 
-  // balance series: TRX from Tronscan; USDT rebuilt from the official USDT transfers of the range, loaded on their
-  // own (contract-filtered) so spam tokens in the TRC20 feed can't push them out of the 5,000 item cap
-  const usdt = useUsdtTransfers(from.address, network, days, series === 'usdt', h.nonce)
+  // balance series: TRX from Tronscan (cached per day); USDT rebuilt from the cached official USDT transfers
+  const usdtCount = useMemo(() => (h.data ? h.data.tokens.filter((x) => x.isUsdt).length : 0), [h.data])
   const usdtPoints = useMemo(() => {
-    if (!usdt.done || balances?.usdt == null) return []
-    const all = usdtSeries(usdt.items, balances.usdt, dayKeys)
-    // without every transfer back to the range start, only days after the oldest loaded transfer are exact
-    return usdt.complete ? all : all.filter((p) => p.day >= dayKey(usdt.oldest))
-  }, [usdt.done, usdt.items, usdt.complete, usdt.oldest, balances?.usdt, dayKeys])
+    if (!h.data || !usdtStatus || balances?.usdt == null) return []
+    const all = usdtSeries(h.data.tokens, balances.usdt, dayKeys)
+    // until the USDT feed is fully cached, only days after its oldest cached transfer are exact
+    return usdtStatus.complete || usdtStatus.oldest === undefined ? all : all.filter((p) => p.day >= dayKey(usdtStatus.oldest!))
+  }, [h.data, usdtStatus, balances?.usdt, dayKeys])
+  const usdtCut = !!usdtStatus && !usdtStatus.complete && usdtStatus.oldest !== undefined && usdtPoints.length < dayKeys.length
   const points = series === 'trx' ? (trxDaily?.points.map((p) => ({ day: p.day, value: p.trx })) ?? []) : usdtPoints
   const first = points[0]?.value ?? 0
   const last = points[points.length - 1]?.value ?? 0
@@ -220,26 +178,42 @@ export function History({ from, keys, network, balances }: {
           ))}
         </nav>
         <span className="spacer" />
-        {!h.done ? (
-          <span className="muted small">
-            loading history… {fmt(h.progress, 0)} txs{' '}
-            <button className="link" onClick={h.stop}>
-              stop
-            </button>
-          </span>
+        <span className="muted small">
+          {fmt(items.length, 0)} txs cached
+          {allStatus?.complete
+            ? ' · complete'
+            : allStatus?.oldest !== undefined && ` · back to ${dayKey(allStatus.oldest)}`}
+          {h.syncing
+            ? ` · syncing${h.added.new ? ` +${fmt(h.added.new, 0)} new` : ''}${h.added.older ? ` +${fmt(h.added.older, 0)} older` : ''}…`
+            : allStatus?.syncedAt && ` · synced ${new Date(allStatus.syncedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`}
+          {h.data?.source && ` · ${h.data.source.host}`}
+          {h.data?.source?.fallback && ' (active node has no history API)'}
+        </span>
+        {h.syncing ? (
+          <button className="ghost" onClick={h.stop}>
+            stop
+          </button>
         ) : (
-          <span className="muted small">
-            {fmt(h.items.length, 0)} txs loaded
-            {h.capped && h.items.length > 0 && ` (not complete: back to ${dayKey(h.items[h.items.length - 1].time)})`}
-            {h.source && ` · ${h.source.host}`}
-            {h.source?.fallback && ' (active node has no history API)'}
-          </span>
+          <>
+            {h.data && !h.data.status.every((x) => x.complete) && (
+              <button className="ghost" onClick={h.sync} title="Continue loading older transactions">
+                load older
+              </button>
+            )}
+            <button className="ghost" onClick={h.sync} title="Fetch new transactions">
+              sync
+            </button>
+            <button
+              className="ghost"
+              onClick={h.clear}
+              title={`Delete this address's cached history (${h.data?.path ?? 'cache.sqlite'}) and download it again`}
+            >
+              clear cache
+            </button>
+          </>
         )}
-        <button className="ghost" onClick={h.reload} disabled={!h.done}>
-          reload
-        </button>
       </div>
-      {h.error && <div className="error small">stopped early: {h.error}</div>}
+      {h.error && <div className="error small">sync stopped: {h.error} (cached data is still shown)</div>}
 
       {/* balance chart */}
       <section className="panel">
@@ -268,22 +242,17 @@ export function History({ from, keys, network, balances }: {
         </div>
         {series === 'trx' && !trxDaily && <div className="chart-empty muted">loading daily balance from Tronscan…</div>}
         {series === 'trx' && trxDaily?.error && <div className="chart-empty error">{trxDaily.error}</div>}
-        {series === 'usdt' && !usdt.done && (
-          <div className="chart-empty muted">loading usdt transfers… {fmt(usdt.count, 0)}</div>
-        )}
-        {series === 'usdt' && usdt.error && <div className="chart-empty error">{usdt.error}</div>}
-        {series === 'usdt' && h.done && balances?.usdt == null && (
+        {series === 'usdt' && !h.data && <div className="chart-empty muted">reading cache…</div>}
+        {series === 'usdt' && h.data && balances?.usdt == null && (
           <div className="chart-empty muted">no USDT balance for this network</div>
         )}
         {points.length > 0 && <LineChart points={points} unit={series} label={`${series} balance per day`} />}
         <div className="muted small">
           {series === 'trx'
             ? `daily balance (end of day, UTC) from ${trxDaily?.source || 'Tronscan'}`
-            : usdt.complete
-              ? `rebuilt from ${fmt(usdt.items.length, 0)} usdt transfers back from today's balance (exact for the whole range)`
-              : usdt.done
-                ? `usdt balance only shown from ${dayKey(usdt.oldest)}: this address has more than ${fmt(USDT_CAP, 0)} usdt transfers in the range, older days would be a guess`
-                : ''}
+            : usdtCut
+              ? `usdt balance shown from ${dayKey(usdtStatus!.oldest!)}: older usdt transfers are not cached yet${h.syncing ? ' (syncing…)' : ' — use "load older"'}`
+              : `rebuilt from ${fmt(usdtCount, 0)} cached usdt transfers back from today's balance`}
         </div>
       </section>
 
@@ -392,7 +361,7 @@ export function History({ from, keys, network, balances }: {
       </div>
 
       {/* table */}
-      {h.done && filtered.length === 0 && <div className="muted">No transactions match.</div>}
+      {h.data && !h.syncing && filtered.length === 0 && <div className="muted">No transactions match.</div>}
       {filtered.length > 0 && (
         <div className="table-scroll">
           <table className="nodes hist">

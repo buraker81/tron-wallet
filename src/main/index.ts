@@ -8,6 +8,7 @@ import * as nodes from './nodes'
 import * as multisig from './multisig'
 import { estimateTx } from './estimate'
 import * as hist from './history'
+import * as historyCache from './historyCache'
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -94,8 +95,11 @@ app.whenReady().then(() => {
   handle('estimateTx', estimateTx)
   handle('rewardInfo', tron.rewardInfo)
   handle('claimRewards', tron.claimRewards)
-  handle('history', hist.history)
-  handle('balanceHistory', hist.balanceHistory)
+  handle('historyData', historyCache.historyData)
+  handle('historySync', historyCache.syncHistory)
+  handle('historyStop', historyCache.stopHistorySync)
+  handle('historyClear', historyCache.clearHistory)
+  handle('balanceHistory', historyCache.balanceHistoryCached)
   handle('txReceipt', hist.txReceipt)
   handle('inspectTx', multisig.inspectTx)
   handle('signTx', multisig.signTx)

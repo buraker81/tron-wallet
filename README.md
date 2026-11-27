@@ -51,13 +51,19 @@ Preview the UI in a normal browser with fake data: run `npm run dev` and open `h
 - **Receipts**: after a broadcast the log polls `getTransactionInfo` and shows the real result, fee, energy and
   bandwidth once the tx is in a block (or the failure reason, e.g. `out_of_energy`).
 - **History** tab (selected address):
-  - loads the full history (TronGrid v1, 200 per page, up to 5,000 txs per feed, with progress and *stop*) and merges
-    the transaction feed with the TRC20 feed (your own TRC20 sends become one row with the token amount and the fees)
+  - history is **cached locally in SQLite** (`cache.sqlite` next to `keys.json`, git-ignored; Electron's built-in
+    `node:sqlite`, no native module). Opening the tab shows the cache instantly, then syncs in the background:
+    new confirmed txs since the last sync, plus loading older ones (5,000 per feed per run, 20,000 for the USDT feed;
+    *load older* continues, so the full history builds up over time). Confirmed txs never change, so each is downloaded
+    once. Raw API rows are stored and turned into items when read, so fee / type rules can change without re-downloading.
+    Past daily balances are cached too (today is refreshed). *clear cache* deletes one address's cache. Set
+    `CACHE_FILE` to use another path.
+  - the transaction feed is merged with the TRC20 feed (your own TRC20 sends become one row with the token amount
+    and the fees)
   - range `30d · 90d · 1y · all` for everything below
   - **balance chart**: daily TRX balance from the Tronscan API (`account/analysis`, end of day UTC), or USDT balance
-    rebuilt from today's balance using the official USDT contract's transfers of the range. These are loaded on their
-    own (TronGrid `contract_address` + `min_timestamp`, up to 20,000), so the 5,000 item cap of the general list does
-    not cut the chart short; if an address has more USDT transfers than that, the chart starts at the oldest loaded
+    rebuilt from today's balance using the cached official USDT transfers (a separate, contract-filtered feed, so other
+    tokens can't crowd it out); until those are cached back to the range start, the chart starts at the oldest cached
     day and says so. Shows start → end and the change
   - **fees burned** by txs this address sent, by cause:
     - resource shortage: bandwidth / energy burned because staked + free resources did not cover the tx
@@ -136,6 +142,7 @@ and the checkboxes update. Bit `N % 8` of byte `N / 8` enables contract type id 
 |---|---|
 | `KEYS_FILE` | Path to a keys file other than `./keys.json` |
 | `VAULT_FILE` | Path to a vault file other than `vault.json` next to the keys file |
+| `CACHE_FILE` | Path to the history cache other than `cache.sqlite` next to the keys file |
 | `NODES_FILE` | Path to a nodes file other than `nodes.json` next to the keys file |
 | `TRONGRID_API_KEY` | Fallback API key for the built-in TronGrid nodes (when none is saved in the app) |
 | `SHASTA_USDT` | Shasta USDT contract (default `TG3XXyExBkPp9nzdajDZsozEu4BkaSJozs`) |
@@ -153,7 +160,8 @@ and the checkboxes update. Bit `N % 8` of byte `N / 8` enables contract type id 
 - `src/main/tron.ts`: all TronWeb reads/writes
 - `src/main/networks.ts`: Shasta / Nile / Mainnet defaults + USDT contracts
 - `src/main/estimate.ts`: fee / bandwidth / energy estimate
-- `src/main/history.ts`: TronGrid v1 history and tx receipts
+- `src/main/history.ts`: TronGrid v1 history pages, item processing (types, fee causes), tx receipts
+- `src/main/historyCache.ts`: SQLite history cache and sync
 - `src/main/multisig.ts`: signing pipeline (note, expiration, signer checks, weight, broadcast) and sign-tx tools
 - `src/main/client.ts`: TronWeb client for the active node / network
 - `src/main/vault.ts`: encrypted vault, HD derivation, key import/export

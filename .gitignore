@@ -10,3 +10,4 @@ vault.json
 vault.json.tmp
 init_plan.md
 scripts/rescue/*.env
+cache.sqlite*

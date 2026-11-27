@@ -14,7 +14,6 @@ import type {
   BalancePoint,
   HistoryItem,
   HistoryKind,
-  HistoryPage,
   NodeConfig,
   TxReceipt
 } from '../shared/types'
@@ -58,7 +57,10 @@ async function feeParams(): Promise<FeeParams> {
   const net = getNetwork()
   const hit = paramCache.get(net)
   if (hit && Date.now() - hit.at < 600_000) return hit.p
-  const list: any[] = await tw().trx.getChainParameters()
+  // offline / rate limited: use the long-standing defaults so cached history still renders
+  const list: any[] = await tw()
+    .trx.getChainParameters()
+    .catch(() => [])
   const v = (k: string, d: number) => sun(list.find((x) => x.key === k)?.value ?? d)
   const p: FeeParams = {
     createAccount: v('getCreateAccountFee', 100_000),
@@ -67,7 +69,7 @@ async function feeParams(): Promise<FeeParams> {
     multisig: v('getMultiSignFee', 1_000_000),
     permission: v('getUpdateAccountPermissionFee', 100_000_000)
   }
-  paramCache.set(net, { at: Date.now(), p })
+  if (list.length) paramCache.set(net, { at: Date.now(), p })
   return p
 }
 
@@ -199,36 +201,58 @@ function fromTrc20(me: string, d: any): HistoryItem {
   }
 }
 
+export type Feed = 'all' | 'trc20' | 'usdt'
+
 /**
- * One page of history. For the TRC20 feed, `opts.usdtOnly` limits it to the network's USDT contract and
- * `opts.since` (ms) stops at that time, so the USDT balance chart can cover its whole range without loading
- * every other transfer.
+ * One raw page of a TronGrid v1 feed, newest first, confirmed txs only (those never change, so they can be cached).
+ * - all: /transactions (internal txs skipped)
+ * - trc20: /transactions/trc20 (every token)
+ * - usdt: /transactions/trc20 filtered to the network's USDT contract
+ * `min` / `max` are block timestamps (ms, inclusive); `fingerprint` continues the same query.
  */
-export async function history(
+export async function fetchRaw(
   address: string,
-  kind: 'all' | 'trc20',
-  fingerprint?: string,
-  opts?: { usdtOnly?: boolean; since?: number }
-): Promise<HistoryPage> {
+  feed: Feed,
+  q: { fingerprint?: string; min?: number; max?: number } = {}
+): Promise<{ rows: any[]; next?: string; source: string; fallback: boolean }> {
   if (!TronWeb.isAddress(address)) throw new Error('Invalid address')
   const { node, fallback } = source()
-  const base = nodeUrl(node)
-  const url = new URL(`${base}/v1/accounts/${address}/transactions${kind === 'trc20' ? '/trc20' : ''}`)
+  const url = new URL(`${nodeUrl(node)}/v1/accounts/${address}/transactions${feed === 'all' ? '' : '/trc20'}`)
   url.searchParams.set('limit', String(PAGE))
-  if (fingerprint) url.searchParams.set('fingerprint', fingerprint)
-  if (kind === 'trc20' && opts?.usdtOnly) url.searchParams.set('contract_address', NETWORKS[getNetwork()].usdt)
-  if (opts?.since) url.searchParams.set('min_timestamp', String(Math.floor(opts.since)))
+  url.searchParams.set('only_confirmed', 'true')
+  if (q.fingerprint) url.searchParams.set('fingerprint', q.fingerprint)
+  if (feed === 'usdt') url.searchParams.set('contract_address', NETWORKS[getNetwork()].usdt)
+  if (q.min !== undefined) url.searchParams.set('min_timestamp', String(Math.floor(q.min)))
+  if (q.max !== undefined) url.searchParams.set('max_timestamp', String(Math.floor(q.max)))
   const res = await throttled(nodeQueueKey(node), nodePolicy(node), () =>
-    checkedFetch(url, { headers: nodeHeaders(node), signal: AbortSignal.timeout(15000) })
+    checkedFetch(url, { headers: nodeHeaders(node), signal: AbortSignal.timeout(20000) })
   )
   if (!res.ok) throw new Error(`History request failed: HTTP ${res.status}`)
   const body: any = await res.json()
   if (body?.success === false) throw new Error(body?.error ?? 'History request failed')
-  const params = kind === 'all' ? await feeParams() : (undefined as unknown as FeeParams)
-  const items = (body.data ?? [])
-    .filter((d: any) => kind === 'trc20' || d.raw_data) // skip internal txs in the mixed feed
-    .map((d: any) => (kind === 'trc20' ? fromTrc20(address, d) : fromTx(address, d, params)))
-  return { items, next: body.meta?.fingerprint, source: new URL(node.fullHost.replace('{key}', 'k')).host, fallback }
+  const rows = (body.data ?? []).filter((d: any) => feed !== 'all' || d.raw_data)
+  return {
+    rows,
+    next: rows.length ? body.meta?.fingerprint : undefined,
+    source: new URL(node.fullHost.replace('{key}', 'k')).host,
+    fallback
+  }
+}
+
+/** Stable id of a raw row within its feed (a tx can emit several TRC20 transfers). */
+export function rowUid(feed: Feed, d: any): string {
+  return feed === 'all'
+    ? d.txID
+    : `${d.transaction_id}:${d.token_info?.address ?? ''}:${d.from}:${d.to}:${d.value}`
+}
+
+export const rowTime = (feed: Feed, d: any): number => Number(d.block_timestamp ?? 0)
+
+/** Turn cached raw rows into history items (fee causes use the network's current fee parameters). */
+export async function processRows(address: string, feed: Feed, rows: any[]): Promise<HistoryItem[]> {
+  if (feed !== 'all') return rows.map((d) => fromTrc20(address, d))
+  const params = await feeParams()
+  return rows.map((d) => fromTx(address, d, params))
 }
 
 /**

@@ -209,12 +209,36 @@ export interface BalanceHistory {
   source: string
 }
 
-export interface HistoryPage {
-  items: HistoryItem[]
-  next?: string
-  /** host the history came from */
-  source: string
-  fallback: boolean
+export interface HistoryFeedStatus {
+  feed: 'all' | 'trc20' | 'usdt'
+  /** rows cached */
+  count: number
+  /** newest / oldest block time cached (ms) */
+  newest?: number
+  oldest?: number
+  /** backfill reached the account's first tx */
+  complete: boolean
+  syncedAt?: number
+}
+
+export interface HistoryData {
+  /** tx feed, newest first */
+  all: HistoryItem[]
+  /** TRC20 transfers (all tokens + the USDT-only feed, deduplicated), newest first */
+  tokens: HistoryItem[]
+  status: HistoryFeedStatus[]
+  syncing: boolean
+  source?: { host: string; fallback: boolean }
+  /** sqlite file */
+  path: string
+}
+
+export interface HistoryProgress {
+  address: string
+  network: NetworkId
+  feed: 'all' | 'trc20' | 'usdt'
+  added: number
+  phase: 'new' | 'older'
 }
 
 export interface TxReceipt {
@@ -308,12 +332,13 @@ export interface Api {
   estimateTx(action: TxAction, id: number, args: unknown[], opts?: TxOptions): Promise<FeeEstimate>
   rewardInfo(address: string): Promise<RewardInfo>
   claimRewards(id: number, opts?: TxOptions): Promise<TxResult>
-  history(
-    address: string,
-    kind: 'all' | 'trc20',
-    fingerprint?: string,
-    opts?: { usdtOnly?: boolean; since?: number }
-  ): Promise<HistoryPage>
+  /** cached history (instant) */
+  historyData(address: string): Promise<HistoryData>
+  /** fetch new txs and continue loading older ones; resolves when done */
+  historySync(address: string): Promise<HistoryFeedStatus[]>
+  historyStop(address: string): Promise<void>
+  historyClear(address: string): Promise<void>
+  onHistoryProgress(cb: (p: HistoryProgress) => void): () => void
   balanceHistory(address: string, days: number): Promise<BalanceHistory>
   txReceipt(txid: string): Promise<TxReceipt>
   inspectTx(json: string): Promise<TxSummary>

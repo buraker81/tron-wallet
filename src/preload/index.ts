@@ -7,7 +7,7 @@ const channels = [
   'revealPrivateKey', 'revealMnemonic',
   'listNodes', 'saveNode', 'deleteNode', 'selectNode', 'testNode',
   'getNetwork', 'setNetwork', 'balances', 'listSRs', 'getPermissions',
-  'sendTrx', 'sendUsdt', 'stake', 'unstake', 'withdrawUnfrozen', 'vote', 'cancelUnstakes', 'delegationInfo', 'getMemoFee', 'estimateTx', 'rewardInfo', 'claimRewards', 'history', 'balanceHistory', 'txReceipt', 'inspectTx', 'signTx', 'broadcastTx', 'delegate', 'undelegate',
+  'sendTrx', 'sendUsdt', 'stake', 'unstake', 'withdrawUnfrozen', 'vote', 'cancelUnstakes', 'delegationInfo', 'getMemoFee', 'estimateTx', 'rewardInfo', 'claimRewards', 'historyData', 'historySync', 'historyStop', 'historyClear', 'balanceHistory', 'txReceipt', 'inspectTx', 'signTx', 'broadcastTx', 'delegate', 'undelegate',
   'updatePermissions', 'explorerUrl'
 ]
 
@@ -24,6 +24,12 @@ api.onVaultChanged = (cb: () => void) => {
   const listener = () => cb()
   ipcRenderer.on('vault-changed', listener)
   return () => ipcRenderer.removeListener('vault-changed', listener)
+}
+
+api.onHistoryProgress = (cb: (p: unknown) => void) => {
+  const listener = (_e: unknown, p: unknown) => cb(p)
+  ipcRenderer.on('history-progress', listener)
+  return () => ipcRenderer.removeListener('history-progress', listener)
 }
 
 contextBridge.exposeInMainWorld('api', api)

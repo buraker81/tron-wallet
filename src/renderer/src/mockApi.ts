@@ -244,13 +244,21 @@ export function installMockApi() {
     rewardInfo: () => wait({ claimable: 12.483921, lastClaim: Date.now() - 3 * 86400e3, nextClaim: Date.now() - 2 * 86400e3 }),
     claimRewards: plainTx,
     txReceipt: () => wait({ found: true, result: 'SUCCESS', feeTrx: 0.345, energy: 13045, bandwidth: 345, block: 70485000 }),
-    history: (_a: string, kind: string, _f?: string, opts?: { usdtOnly?: boolean; since?: number }) =>
-      wait({
-        items: (kind === 'trc20' ? mockTrc20 : mockAll).filter(
-          (x) => (!opts?.usdtOnly || x.isUsdt) && (!opts?.since || x.time >= opts.since)
-        ),
-        next: undefined, source: 'api.shasta.trongrid.io', fallback: false
-      }, 300),
+    historyData: () => {
+      const st = (feed: string, list: any[]) => ({
+        feed, count: list.length, complete: feed !== 'usdt', syncedAt: Date.now() - 60e3,
+        newest: list[0]?.time, oldest: feed === 'usdt' ? Date.now() - 40 * 864e5 : list[list.length - 1]?.time
+      })
+      return wait({
+        all: mockAll, tokens: mockTrc20,
+        status: [st('all', mockAll), st('trc20', mockTrc20), st('usdt', mockTrc20.filter((x) => x.isUsdt))],
+        syncing: false, source: { host: 'api.shasta.trongrid.io', fallback: false }, path: '/Users/you/projects/tron_wallet/cache.sqlite'
+      }, 120)
+    },
+    historySync: () => wait([], 1200),
+    historyStop: () => wait(undefined),
+    historyClear: () => wait(undefined),
+    onHistoryProgress: () => () => {},
     balanceHistory: (_a: string, days: number) =>
       wait({ points: mockDaily.slice(-Math.min(days, mockDaily.length)), source: 'shastapi.tronscan.org' }, 400),
     inspectTx: (json: string) => { try { return wait(summarize(json)) } catch (e) { return Promise.reject(e) } },
