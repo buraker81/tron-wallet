@@ -67,6 +67,40 @@ export interface TxResult {
   txid: string
   ok: boolean
   message?: string
+  /** set when the tx was signed but does not have enough weight yet (multisig) */
+  pending?: PendingTx
+}
+
+export interface PendingTx {
+  /** signed (partially) transaction as JSON */
+  json: string
+  txid: string
+  weight: number
+  threshold: number
+}
+
+export interface TxSummary {
+  txid: string
+  network: NetworkId
+  /** account the tx acts on */
+  owner: string
+  contractType: string
+  /** human readable contract params (addresses base58, amounts in TRX where known) */
+  params: [string, string][]
+  permissionId: number
+  permissionName: string
+  note?: string
+  expiration: number
+  expired: boolean
+  signatures: number
+  /** base58 addresses that already signed */
+  approved: string[]
+  weight: number
+  threshold: number
+  keys: PermissionKey[]
+  /** ENOUGH_PERMISSION when it can be broadcast */
+  status: string
+  statusMessage?: string
 }
 
 export interface SR {
@@ -97,6 +131,12 @@ export interface AccountPermissions {
 
 export interface TxOptions {
   permissionId?: number
+  /** key ids that sign; defaults to the account's own key */
+  signers?: number[]
+  /** memo stored in raw_data.data (utf8) */
+  note?: string
+  /** tx lifetime in minutes (default ~1). Use more when collecting signatures. Max 1440. */
+  expireMinutes?: number
 }
 
 export interface NodeConfig {
@@ -160,6 +200,10 @@ export interface Api {
   withdrawUnfrozen(id: number, opts?: TxOptions): Promise<TxResult>
   cancelUnstakes(id: number, opts?: TxOptions): Promise<TxResult>
   delegationInfo(address: string): Promise<DelegationInfo>
+  getMemoFee(): Promise<number>
+  inspectTx(json: string): Promise<TxSummary>
+  signTx(json: string, signerIds: number[]): Promise<{ json: string; summary: TxSummary }>
+  broadcastTx(json: string): Promise<TxResult>
   delegate(
     id: number,
     receiver: string,

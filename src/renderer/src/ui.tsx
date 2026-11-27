@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react'
-import type { PublicKey } from '../../shared/types'
+import { createContext, useContext, type ReactNode } from 'react'
+import type { PublicKey, TxOptions } from '../../shared/types'
 
 export const short = (a: string) => (a.length > 14 ? `${a.slice(0, 6)}…${a.slice(-6)}` : a)
 export const fmt = (n: number, d = 6) => n.toLocaleString('en-US', { maximumFractionDigits: d })
@@ -42,23 +42,109 @@ export function AddressInput({
   )
 }
 
-export function PermissionIdInput({
-  value,
-  onChange
-}: {
-  value: string
-  onChange: (v: string) => void
-}) {
-  return (
-    <Field label="Permission ID (optional, for multisig)">
-      <input
-        value={value}
-        onChange={(e) => onChange(e.target.value.replace(/[^0-9]/g, ''))}
-        placeholder="0 = owner, 2+ = active"
-        style={{ width: 200 }}
-      />
-    </Field>
-  )
+export interface TxOptsState {
+  permId: string
+  note: string
+  signers: number[]
+  expireMinutes: string
+}
+export const EMPTY_TX_OPTS: TxOptsState = { permId: '', note: '', signers: [], expireMinutes: '' }
+
+export const toOpts = (o: TxOptsState): TxOptions | undefined => {
+  const opts: TxOptions = {}
+  if (o.permId !== '') opts.permissionId = Number(o.permId)
+  if (o.note.trim()) opts.note = o.note.trim()
+  if (o.signers.length) opts.signers = o.signers
+  if (Number(o.expireMinutes) > 1) opts.expireMinutes = Number(o.expireMinutes)
+  return Object.keys(opts).length ? opts : undefined
 }
 
-export const toOpts = (permId: string) => (permId === '' ? undefined : { permissionId: Number(permId) })
+/** Shared by the app: address book, selected account, network memo fee. */
+export const TxContext = createContext<{ keys: PublicKey[]; from?: PublicKey; memoFee: number }>({ keys: [], memoFee: 0 })
+
+/**
+ * Note + signing options shown under every transaction form.
+ * Leaving signers empty signs with the account's own key (the normal case).
+ */
+export function TxOptionsInput({ value, onChange }: { value: TxOptsState; onChange: (v: TxOptsState) => void }) {
+  const { keys, from, memoFee } = useContext(TxContext)
+  const set = (patch: Partial<TxOptsState>) => onChange({ ...value, ...patch })
+  const signable = keys.filter((k) => k.canSign)
+  const ownCantSign = !!from && !from.canSign
+  const advanced = value.permId !== '' || value.signers.length > 0 || value.expireMinutes !== ''
+  const multi = value.signers.length > 1 || (value.signers.length === 1 && value.signers[0] !== from?.id)
+  const noteBytes = new TextEncoder().encode(value.note.trim()).length
+
+  return (
+    <div className="tx-opts">
+      <Field label={`note (optional, stored on chain${memoFee ? `, adds ${memoFee} trx fee` : ''})`}>
+        <input value={value.note} onChange={(e) => set({ note: e.target.value })} placeholder="memo" maxLength={512} />
+      </Field>
+      {noteBytes > 0 && <span className="muted small">{noteBytes} bytes</span>}
+
+      <details open={advanced || ownCantSign}>
+        <summary>
+          signing
+          <span className="muted">
+            {' '}
+            {value.signers.length
+              ? `· ${value.signers.map((id) => `#${id}`).join(', ')}`
+              : ownCantSign
+                ? '· pick signers (account is watch-only)'
+                : '· own key'}
+            {value.permId !== '' && ` · permission ${value.permId}`}
+          </span>
+        </summary>
+        <div className="tx-opts-body">
+          <div className="row">
+            <Field label="permission id">
+              <input
+                value={value.permId}
+                onChange={(e) => set({ permId: e.target.value.replace(/[^0-9]/g, '') })}
+                placeholder="0 owner, 2+ active"
+                style={{ width: 170 }}
+              />
+            </Field>
+            <Field label="valid for (minutes)">
+              <input
+                value={value.expireMinutes}
+                onChange={(e) => set({ expireMinutes: e.target.value.replace(/[^0-9]/g, '') })}
+                placeholder={multi ? '60' : '1'}
+                style={{ width: 140 }}
+              />
+            </Field>
+          </div>
+          <div className="field">
+            <span>signers (empty = account's own key)</span>
+            <div className="signers">
+              {signable.map((k) => (
+                <label key={k.id} className="check">
+                  <input
+                    type="checkbox"
+                    checked={value.signers.includes(k.id)}
+                    onChange={(e) =>
+                      set({
+                        signers: e.target.checked
+                          ? [...value.signers, k.id]
+                          : value.signers.filter((x) => x !== k.id)
+                      })
+                    }
+                  />
+                  <span>
+                    #{k.id} {short(k.address)}
+                    {k.label && <span className="muted"> {k.label}</span>}
+                  </span>
+                </label>
+              ))}
+            </div>
+          </div>
+          <div className="muted small">
+            If the signers reach the permission threshold the tx is broadcast. Otherwise it is kept as a partially
+            signed tx in the sign-tx tab, where more signatures can be added (or the JSON shared).
+            {multi && !value.expireMinutes && ' Set "valid for" if other people still need to sign.'}
+          </div>
+        </div>
+      </details>
+    </div>
+  )
+}

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Balances, NetworkId, NodeState, PublicKey, TxResult, VaultStatus } from '../../shared/types'
-import { fmt, short } from './ui'
+import { TxContext, fmt, short } from './ui'
 import { SendTrx, SendUsdt } from './components/Send'
 import { Stake } from './components/Stake'
 import { Vote } from './components/Vote'
@@ -10,8 +10,9 @@ import { BalancesPanel } from './components/BalancesPanel'
 import { NETWORK_LABELS, NodesModal } from './components/NodesModal'
 import { CreateVaultModal, UnlockModal, VaultBar, VaultModal } from './components/Vault'
 import { AccountActions } from './components/AccountActions'
+import { SignTx, type PendingEntry } from './components/SignTx'
 
-const TABS = ['send-trx', 'send-usdt', 'stake', 'delegate', 'vote', 'permissions'] as const
+const TABS = ['send-trx', 'send-usdt', 'stake', 'delegate', 'vote', 'permissions', 'sign-tx'] as const
 type Tab = (typeof TABS)[number]
 
 interface LogEntry {
@@ -23,7 +24,8 @@ interface LogEntry {
   url?: string
 }
 
-export type RunTx = (label: string, fn: () => Promise<TxResult>) => Promise<void>
+/** Runs a tx action with mainnet confirmation and logging. Resolves to the result, or undefined if cancelled/failed. */
+export type RunTx = (label: string, fn: () => Promise<TxResult>) => Promise<TxResult | undefined>
 
 export default function App() {
   const [network, setNetwork] = useState<NetworkId>('shasta')
@@ -34,6 +36,9 @@ export default function App() {
   const [loading, setLoading] = useState(false)
   const [tab, setTab] = useState<Tab>('send-trx')
   const [log, setLog] = useState<LogEntry[]>([])
+  const [pending, setPending] = useState<PendingEntry[]>([])
+  const [signJson, setSignJson] = useState('')
+  const [memoFee, setMemoFee] = useState(0)
   const [busy, setBusy] = useState(false)
   const [confirm, setConfirm] = useState<{ label: string; resolve: (ok: boolean) => void }>()
   const [copied, setCopied] = useState<string>()
@@ -128,22 +133,40 @@ export default function App() {
     new Promise<boolean>((resolve) => setConfirm({ label, resolve }))
 
   const runTx: RunTx = async (label, fn) => {
-    if (networkRef.current === 'mainnet' && !(await askConfirm(label))) return
+    if (networkRef.current === 'mainnet' && !(await askConfirm(label))) return undefined
     setBusy(true)
     const time = new Date().toLocaleTimeString('en-GB')
     const net = networkRef.current
     try {
       const result = await fn()
+      if (result.pending) {
+        // signed but below threshold: keep it for the sign-tx tab
+        const p = result.pending
+        setPending((list) => [{ txid: p.txid, label, json: p.json, network: net }, ...list.filter((x) => x.txid !== p.txid)])
+        setLog((l) => [{ time, network: net, label, result }, ...l])
+        return result
+      }
       const url = result.txid ? await window.api.explorerUrl(result.txid) : undefined
       setLog((l) => [{ time, network: net, label, result, url }, ...l])
       // give the node a moment to include the tx before refreshing
       setTimeout(() => refresh(keys), 3500)
+      return result
     } catch (e: any) {
       setLog((l) => [{ time, network: net, label, error: e.message }, ...l])
+      return undefined
     } finally {
       setBusy(false)
     }
   }
+
+  const openPending = (json: string) => {
+    setSignJson(json)
+    setTab('sign-tx')
+  }
+
+  useEffect(() => {
+    window.api.getMemoFee().then(setMemoFee).catch(() => setMemoFee(0))
+  }, [network])
 
   const copy = (addr: string) => {
     navigator.clipboard.writeText(addr)
@@ -157,6 +180,7 @@ export default function App() {
   const activeNode = nodes?.nodes.find((n) => n.id === nodes.selected[network])
 
   return (
+    <TxContext.Provider value={{ keys, from: selected, memoFee }}>
     <div className={`app ${network}`}>
       {network === 'mainnet' && <div className="mainnet-bar">mainnet: transactions are real</div>}
       <header>
@@ -275,6 +299,21 @@ export default function App() {
                   <Delegate from={selected} balances={bal} network={network} {...common} />
                 )}
                 {tab === 'vote' && <Vote from={selected} balances={bal} network={network} {...common} />}
+                {tab === 'sign-tx' && (
+                  <SignTx
+                    keys={keys}
+                    network={network}
+                    pending={pending}
+                    json={signJson}
+                    setJson={setSignJson}
+                    onUpdated={(txid, json) =>
+                      setPending((list) => list.map((p) => (p.txid === txid ? { ...p, json } : p)))
+                    }
+                    onDone={(txid) => setPending((list) => list.filter((p) => p.txid !== txid))}
+                    runTx={runTx}
+                    busy={busy}
+                  />
+                )}
                 {tab === 'permissions' && <Permissions from={selected} network={network} {...common} />}
               </section>
             </>
@@ -301,7 +340,17 @@ export default function App() {
               <span className={`net ${e.network}`}>{e.network}</span>
               <span className="log-label">{e.label}</span>
               {e.error && <span className="error">err {e.error}</span>}
-              {e.result && (
+              {e.result?.pending && (
+                <>
+                  <span className="warn">
+                    pending {e.result.pending.weight}/{e.result.pending.threshold}
+                  </span>
+                  <button className="link" onClick={() => openPending(e.result!.pending!.json)}>
+                    open in sign-tx
+                  </button>
+                </>
+              )}
+              {e.result && !e.result.pending && (
                 <>
                   <span className={e.result.ok ? 'ok' : 'error'}>{e.result.ok ? 'ok' : `err ${e.result.message}`}</span>
                   {e.url && (
@@ -364,5 +413,6 @@ export default function App() {
         </div>
       )}
     </div>
+    </TxContext.Provider>
   )
 }

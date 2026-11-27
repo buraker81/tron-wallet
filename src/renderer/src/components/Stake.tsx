@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { Balances, PublicKey, Resource } from '../../../shared/types'
 import type { RunTx } from '../App'
-import { Field, PermissionIdInput, fmt, toOpts } from '../ui'
+import { Field, TxOptionsInput, EMPTY_TX_OPTS, fmt, toOpts } from '../ui'
 
 interface Props {
   from: PublicKey
@@ -14,7 +14,7 @@ interface Props {
 export function Stake({ from, balances, runTx, busy }: Props) {
   const [amount, setAmount] = useState('')
   const [resource, setResource] = useState<Resource>('ENERGY')
-  const [permId, setPermId] = useState('')
+  const [permId, setPermId] = useState(EMPTY_TX_OPTS)
   const n = Number(amount)
   const now = Date.now()
   const withdrawable = (balances?.unfreezing ?? []).filter((u) => u.expireAt <= now).reduce((s, u) => s + u.amount, 0)
@@ -31,7 +31,7 @@ export function Stake({ from, balances, runTx, busy }: Props) {
           <option value="BANDWIDTH">BANDWIDTH</option>
         </select>
       </Field>
-      <PermissionIdInput value={permId} onChange={setPermId} />
+      <TxOptionsInput value={permId} onChange={setPermId} />
       <div className="row">
         <button
           className="primary"

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { AccountPermissions, NetworkId, Permission, PublicKey } from '../../../shared/types'
 import type { RunTx } from '../App'
-import { AddressInput, Field, PermissionIdInput, toOpts } from '../ui'
+import { AddressInput, Field, TxOptionsInput, EMPTY_TX_OPTS, toOpts } from '../ui'
 import { DEFAULT_OPS } from '../../../shared/operations'
 import { OperationsEditor } from './OperationsEditor'
 
@@ -32,7 +32,7 @@ export function Permissions({ from, keys, network, runTx, busy }: Props) {
   const [error, setError] = useState<string>()
   const [owner, setOwner] = useState<Permission>(blankOwner(from.address))
   const [actives, setActives] = useState<Permission[]>([])
-  const [permId, setPermId] = useState('')
+  const [permId, setPermId] = useState(EMPTY_TX_OPTS)
 
   const load = () => {
     setError(undefined)
@@ -90,7 +90,7 @@ export function Permissions({ from, keys, network, runTx, busy }: Props) {
         </button>
         <button onClick={load}>Reset to on-chain</button>
       </div>
-      <PermissionIdInput value={permId} onChange={setPermId} />
+      <TxOptionsInput value={permId} onChange={setPermId} />
       <button className="primary danger" disabled={busy} onClick={submit}>
         Update account permissions
       </button>

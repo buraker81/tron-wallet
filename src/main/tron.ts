@@ -1,13 +1,12 @@
 import { TronWeb } from 'tronweb'
-import { getKey } from './key'
 import { NETWORKS } from './networks'
-import { activeNode, nodeHeaders } from './nodes'
+import { SUN, getNetwork, setNetwork, toBase58, tw } from './client'
+import { execute } from './multisig'
 import type {
   AccountPermissions,
   Balances,
   Delegation,
   DelegationInfo,
-  NetworkId,
   Permission,
   Resource,
   SR,
@@ -15,64 +14,26 @@ import type {
   TxResult
 } from '../shared/types'
 
-const SUN = 1_000_000
-
-let current: NetworkId = 'shasta'
-
-export const getNetwork = (): NetworkId => current
-export function setNetwork(n: NetworkId): NetworkId {
-  if (!NETWORKS[n]) throw new Error(`Unknown network: ${n}`)
-  current = n
-  return current
-}
-
-function tw(privateKey?: string): TronWeb {
-  const node = activeNode(current)
-  return new TronWeb({ fullHost: node.fullHost, headers: nodeHeaders(node), privateKey })
-}
-
-const toBase58 = (addr: string): string =>
-  addr.startsWith('T') ? addr : TronWeb.address.fromHex(addr)
+export { getNetwork, setNetwork }
 
 const permIdOpt = (opts?: TxOptions) =>
   opts?.permissionId !== undefined && opts.permissionId !== null && !Number.isNaN(opts.permissionId)
     ? { permissionId: opts.permissionId }
     : {}
 
-/** Sign + broadcast an unsigned tx built with the given key. */
-async function broadcast(t: TronWeb, tx: any, pk: string): Promise<TxResult> {
-  const signed = await t.trx.sign(tx, pk)
-  const res: any = await t.trx.sendRawTransaction(signed)
-  const txid = res?.txid ?? res?.transaction?.txID ?? tx.txID
-  if (res?.result) return { txid, ok: true }
-  let message = res?.code ? String(res.code) : 'Broadcast failed'
-  if (res?.message) {
-    try {
-      message += `: ${Buffer.from(res.message, 'hex').toString('utf8')}`
-    } catch {
-      message += `: ${res.message}`
-    }
-  }
-  return { txid, ok: false, message }
-}
-
-/** Load key, create a TronWeb bound to it, run builder, broadcast. */
-async function withKey(
+/** Build with the account's address, then sign / weigh / broadcast through the shared pipeline. */
+const withKey = (
   id: number,
-  build: (t: TronWeb, address: string) => Promise<any>
-): Promise<TxResult> {
-  const key = getKey(id)
-  const t = tw(key.privateKey)
-  const tx = await build(t, key.address)
-  return broadcast(t, tx, key.privateKey)
-}
+  build: (t: TronWeb, address: string) => Promise<any>,
+  opts?: TxOptions
+): Promise<TxResult> => execute(id, build, opts)
 
 // ---------- reads ----------
 
 async function usdtBalance(t: TronWeb, address: string): Promise<number | null> {
   try {
     const res: any = await t.transactionBuilder.triggerConstantContract(
-      NETWORKS[current].usdt,
+      NETWORKS[getNetwork()].usdt,
       'balanceOf(address)',
       {},
       [{ type: 'address', value: address }],
@@ -197,13 +158,14 @@ export async function getPermissions(address: string): Promise<AccountPermission
 
 export const sendTrx = (id: number, to: string, amount: number, opts?: TxOptions) =>
   withKey(id, (t, from) =>
-    t.transactionBuilder.sendTrx(to, Math.round(amount * SUN), from, permIdOpt(opts))
+    t.transactionBuilder.sendTrx(to, Math.round(amount * SUN), from, permIdOpt(opts)),
+  opts
   )
 
 export const sendUsdt = (id: number, to: string, amount: number, opts?: TxOptions) =>
   withKey(id, async (t, from) => {
     const { transaction } = await t.transactionBuilder.triggerSmartContract(
-      NETWORKS[current].usdt,
+      NETWORKS[getNetwork()].usdt,
       'transfer(address,uint256)',
       { feeLimit: 100 * SUN, ...permIdOpt(opts) },
       [
@@ -213,23 +175,25 @@ export const sendUsdt = (id: number, to: string, amount: number, opts?: TxOption
       from
     )
     return transaction
-  })
+  }, opts)
 
 export const stake = (id: number, amount: number, resource: Resource, opts?: TxOptions) =>
   withKey(id, (t, from) =>
-    t.transactionBuilder.freezeBalanceV2(Math.round(amount * SUN), resource, from, permIdOpt(opts))
+    t.transactionBuilder.freezeBalanceV2(Math.round(amount * SUN), resource, from, permIdOpt(opts)),
+  opts
   )
 
 export const unstake = (id: number, amount: number, resource: Resource, opts?: TxOptions) =>
   withKey(id, (t, from) =>
-    t.transactionBuilder.unfreezeBalanceV2(Math.round(amount * SUN), resource, from, permIdOpt(opts))
+    t.transactionBuilder.unfreezeBalanceV2(Math.round(amount * SUN), resource, from, permIdOpt(opts)),
+  opts
   )
 
 export const withdrawUnfrozen = (id: number, opts?: TxOptions) =>
-  withKey(id, (t, from) => t.transactionBuilder.withdrawExpireUnfreeze(from, permIdOpt(opts)))
+  withKey(id, (t, from) => t.transactionBuilder.withdrawExpireUnfreeze(from, permIdOpt(opts)), opts)
 
 export const cancelUnstakes = (id: number, opts?: TxOptions) =>
-  withKey(id, (t, from) => t.transactionBuilder.cancelUnfreezeBalanceV2(from, permIdOpt(opts)))
+  withKey(id, (t, from) => t.transactionBuilder.cancelUnfreezeBalanceV2(from, permIdOpt(opts)), opts)
 
 export const delegate = (
   id: number,
@@ -248,16 +212,18 @@ export const delegate = (
       lockPeriodBlocks > 0,
       lockPeriodBlocks > 0 ? Math.floor(lockPeriodBlocks) : undefined,
       permIdOpt(opts)
-    )
+    ),
+  opts
   )
 
 export const undelegate = (id: number, receiver: string, amount: number, resource: Resource, opts?: TxOptions) =>
   withKey(id, (t, from) =>
-    t.transactionBuilder.undelegateResource(Math.round(amount * SUN), receiver, resource, from, permIdOpt(opts))
+    t.transactionBuilder.undelegateResource(Math.round(amount * SUN), receiver, resource, from, permIdOpt(opts)),
+  opts
   )
 
 export const vote = (id: number, votes: Record<string, number>, opts?: TxOptions) =>
-  withKey(id, (t, from) => t.transactionBuilder.vote(votes, from, permIdOpt(opts)))
+  withKey(id, (t, from) => t.transactionBuilder.vote(votes, from, permIdOpt(opts)), opts)
 
 export const updatePermissions = (
   id: number,
@@ -272,7 +238,8 @@ export const updatePermissions = (
       null,
       actives as any,
       permIdOpt(opts)
-    )
+    ),
+  opts
   )
 
-export const explorerUrl = (txid: string) => NETWORKS[current].explorer + txid
+export const explorerUrl = (txid: string) => NETWORKS[getNetwork()].explorer + txid

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { Balances, NetworkId, PublicKey, SR } from '../../../shared/types'
 import type { RunTx } from '../App'
-import { PermissionIdInput, fmt, short, toOpts } from '../ui'
+import { TxOptionsInput, EMPTY_TX_OPTS, fmt, short, toOpts } from '../ui'
 
 interface Props {
   from: PublicKey
@@ -17,7 +17,7 @@ export function Vote({ from, balances, network, runTx, busy }: Props) {
   const [error, setError] = useState<string>()
   const [votes, setVotes] = useState<Record<string, string>>({})
   const [filter, setFilter] = useState('')
-  const [permId, setPermId] = useState('')
+  const [permId, setPermId] = useState(EMPTY_TX_OPTS)
 
   useEffect(() => {
     setSrs([])
@@ -72,7 +72,7 @@ export function Vote({ from, balances, network, runTx, busy }: Props) {
           </div>
         ))}
       </div>
-      <PermissionIdInput value={permId} onChange={setPermId} />
+      <TxOptionsInput value={permId} onChange={setPermId} />
       <button
         className="primary"
         disabled={busy || Object.keys(payload).length === 0 || total > power}

@@ -5,6 +5,7 @@ import { listKeys, keysPath, loadFileKeys } from './key'
 import * as vault from './vault'
 import * as tron from './tron'
 import * as nodes from './nodes'
+import * as multisig from './multisig'
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -87,6 +88,10 @@ app.whenReady().then(() => {
   handle('vote', tron.vote)
   handle('cancelUnstakes', tron.cancelUnstakes)
   handle('delegationInfo', tron.delegationInfo)
+  handle('getMemoFee', multisig.getMemoFee)
+  handle('inspectTx', multisig.inspectTx)
+  handle('signTx', multisig.signTx)
+  handle('broadcastTx', multisig.broadcastTx)
   handle('delegate', tron.delegate)
   handle('undelegate', tron.undelegate)
   handle('updatePermissions', tron.updatePermissions)

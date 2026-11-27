@@ -39,6 +39,26 @@ Monospace (IBM Plex Mono), flat, light and dark themes (toggle in the header; de
 Preview the UI in a normal browser with fake data: run `npm run dev` and open `http://localhost:5173`
 (when the Electron preload is missing, a dev-only mock API is used).
 
+## Notes, signing and multisig
+
+Every transaction form has:
+
+- **note**: a memo stored on chain in `raw_data.data` (UTF-8). The network charges a memo fee (shown next to the field,
+  `getMemoFee`, 1 TRX on Shasta/mainnet at the time of writing).
+- **signing** (collapsed by default):
+  - *permission id*: `0` owner, `2+` active permissions.
+  - *signers*: which keys sign (`keys.json` or vault). Empty means the account's own key. The account itself can be
+    watch-only, so you can operate a multisig account whose keys are held by others.
+  - *valid for*: tx lifetime in minutes (default ~1 min, max 24 h). Raise it when other people still need to sign.
+
+Every signer is checked against the tx's permission before signing. If the signatures reach the permission threshold
+the tx is broadcast; otherwise it is kept as **pending** (log: `pending 1/2 · open in sign-tx`).
+
+The **sign-tx** tab works with plain TRON transaction JSON (so it interoperates with TronWeb / wallet-cli):
+paste one or open a pending one, see the decoded contract (TRC20 transfers included), note, permission, expiry and
+which keys signed, add signatures with the keys you have, copy the JSON for other signers, and broadcast when ready.
+Pasted transactions are verified with `txCheck` (the readable `raw_data` must match the signed `raw_data_hex` and txID).
+
 ## Delegation
 
 The `delegate` tab lends energy or bandwidth from staked TRX to another address (Stake 2.0 `DelegateResource`).
@@ -82,6 +102,8 @@ and the checkboxes update. Bit `N % 8` of byte `N / 8` enables contract type id 
 - `src/main/key.ts`: `Key` interface, `getKey(id)`, `listKeys()`
 - `src/main/tron.ts`: all TronWeb reads/writes
 - `src/main/networks.ts`: Shasta / Nile / Mainnet defaults + USDT contracts
+- `src/main/multisig.ts`: signing pipeline (note, expiration, signer checks, weight, broadcast) and sign-tx tools
+- `src/main/client.ts`: TronWeb client for the active node / network
 - `src/main/vault.ts`: encrypted vault, HD derivation, key import/export
 - `src/main/nodes.ts`: node list, selection, API keys, connection test
 - `src/shared/operations.ts`: operations bitmask encode/decode + contract type list

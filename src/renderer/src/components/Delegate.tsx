@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { Balances, Delegation, DelegationInfo, NetworkId, PublicKey, Resource } from '../../../shared/types'
 import type { RunTx } from '../App'
-import { AddressInput, Field, PermissionIdInput, fmt, short, toOpts } from '../ui'
+import { AddressInput, Field, TxOptionsInput, EMPTY_TX_OPTS, fmt, short, toOpts } from '../ui'
 
 const BLOCK_SECONDS = 3
 const blocksToText = (blocks: number) => {
@@ -28,7 +28,7 @@ export function Delegate({ from, keys, balances, network, runTx, busy }: Props) 
   const [resource, setResource] = useState<Resource>('ENERGY')
   const [lock, setLock] = useState(false)
   const [lockDays, setLockDays] = useState('3')
-  const [permId, setPermId] = useState('')
+  const [permId, setPermId] = useState(EMPTY_TX_OPTS)
 
   const load = useCallback(() => {
     setError(undefined)
@@ -114,7 +114,7 @@ export function Delegate({ from, keys, balances, network, runTx, busy }: Props) 
       {lock && <div className="muted small">A locked delegation cannot be reclaimed before the lock ends.</div>}
       {lockTooLong && <div className="error">Lock period is longer than the chain allows.</div>}
       {n > max && max > 0 && <div className="error">Amount is more than you can delegate.</div>}
-      <PermissionIdInput value={permId} onChange={setPermId} />
+      <TxOptionsInput value={permId} onChange={setPermId} />
       <button
         className="primary"
         disabled={!canDelegate || busy}

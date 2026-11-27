@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { PublicKey } from '../../../shared/types'
 import type { RunTx } from '../App'
-import { AddressInput, Field, PermissionIdInput, short, toOpts } from '../ui'
+import { AddressInput, Field, TxOptionsInput, EMPTY_TX_OPTS, short, toOpts } from '../ui'
 
 interface Props {
   from: PublicKey
@@ -13,7 +13,7 @@ interface Props {
 function SendForm({ from, keys, runTx, busy, token }: Props & { token: 'TRX' | 'USDT' }) {
   const [to, setTo] = useState('')
   const [amount, setAmount] = useState('')
-  const [permId, setPermId] = useState('')
+  const [permId, setPermId] = useState(EMPTY_TX_OPTS)
   const valid = to.startsWith('T') && to.length === 34 && Number(amount) > 0
 
   const submit = () => {
@@ -34,7 +34,7 @@ function SendForm({ from, keys, runTx, busy, token }: Props & { token: 'TRX' | '
       <Field label={`Amount (${token})`}>
         <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.0" />
       </Field>
-      <PermissionIdInput value={permId} onChange={setPermId} />
+      <TxOptionsInput value={permId} onChange={setPermId} />
       {token === 'USDT' && <div className="muted small">Fee limit: 100 TRX. Uses the network's USDT contract.</div>}
       <button className="primary" disabled={!valid || busy} onClick={submit}>
         {busy ? 'Sending…' : `Send ${token}`}

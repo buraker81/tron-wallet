@@ -277,3 +277,19 @@ pre.secret { word-break: break-all; white-space: pre-wrap; user-select: all; }
 /* ---------- delegate ---------- */
 label.check { display: flex; align-items: center; gap: 8px; cursor: pointer; }
 .deleg-table { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+
+/* ---------- tx options / sign-tx ---------- */
+.tx-opts { display: flex; flex-direction: column; gap: 8px; border-top: 1px dashed var(--line); padding-top: 12px; }
+.tx-opts details summary { cursor: pointer; color: var(--ink-2); list-style: none; }
+.tx-opts details summary::before { content: '+ '; color: var(--muted); }
+.tx-opts details[open] summary::before { content: '- '; }
+.tx-opts-body { display: flex; flex-direction: column; gap: 12px; padding: 10px 0 0 14px; border-left: 1px solid var(--line); margin-top: 8px; }
+.signers { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 4px 16px; }
+textarea.tx-json { font-size: 11.5px; line-height: 1.45; }
+.pending-list { display: flex; flex-direction: column; border: 1px solid var(--line); }
+button.pending-item { display: flex; gap: 14px; border: none; border-bottom: 1px solid var(--line-soft); text-align: left; background: var(--field); }
+button.pending-item:last-child { border-bottom: none; }
+button.pending-item.on { background: var(--ink); color: var(--bg); }
+button.pending-item.on .muted { color: var(--sel-muted); }
+dd.mono-wrap { word-break: break-all; }
+button.pending-item { text-transform: none; }

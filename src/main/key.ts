@@ -45,6 +45,13 @@ export function getKey(id: number): Key {
   throw new Error(`Key with id ${id} not found`)
 }
 
+/** Address for an id, including watch-only vault entries (which have no private key). */
+export function getAddress(id: number): string {
+  const k = listKeys().find((x) => x.id === id)
+  if (!k) throw new Error(`Key with id ${id} not found`)
+  return k.address
+}
+
 /** All addresses without secrets: keys.json entries followed by vault entries (when unlocked). */
 export function listKeys(): PublicKey[] {
   const file: PublicKey[] = loadFileKeys().map(({ id, address }) => ({ id, address, source: 'file', canSign: true }))

@@ -62,7 +62,25 @@ let nodes: NodeState = {
 }
 
 const wait = <T>(v: T, ms = 150) => new Promise<T>((r) => setTimeout(() => r(v), ms))
-const tx = () => wait({ txid: Math.random().toString(16).slice(2).padEnd(64, 'a'), ok: Math.random() > 0.3, message: 'CONTRACT_VALIDATE_ERROR: balance is not sufficient' }, 400)
+const mockMultisig = (opts?: any) => {
+  const txid = Math.random().toString(16).slice(2).padEnd(64, 'b')
+  const json = JSON.stringify({ mock: true, txid, signed: [fileKeys[0].address], note: opts?.note, exp: Date.now() + 3600e3 })
+  return wait({ txid, ok: false, message: 'signed 1/2, needs more signatures', pending: { json, txid, weight: 1, threshold: 2 } }, 400)
+}
+const summarize = (json: string) => {
+  const m = JSON.parse(json)
+  if (!m.mock) throw new Error('raw_data does not match raw_data_hex / txID (tampered or corrupted transaction)')
+  const permKeys = [fileKeys[0].address, vaultKeys[0].address, 'TGzz8gjYiYRqpfmDwnLxfgPuLVNmpCswVp']
+  return {
+    txid: m.txid, network, owner: fileKeys[0].address, contractType: 'TransferContract',
+    params: [['to address', fileKeys[1].address], ['amount', '25 trx']], permissionId: 2, permissionName: 'treasury',
+    note: m.note, expiration: m.exp, expired: false, signatures: m.signed.length, approved: m.signed,
+    weight: m.signed.length, threshold: 2, keys: permKeys.map((address) => ({ address, weight: 1 })),
+    status: m.signed.length >= 2 ? 'ENOUGH_PERMISSION' : 'NOT_ENOUGH_PERMISSION'
+  }
+}
+const tx = (...args: any[]) => (args[args.length - 1]?.signers ? mockMultisig(args[args.length - 1]) : plainTx())
+const plainTx = () => wait({ txid: Math.random().toString(16).slice(2).padEnd(64, 'a'), ok: Math.random() > 0.3, message: 'CONTRACT_VALIDATE_ERROR: balance is not sufficient' }, 400)
 
 export function installMockApi() {
   ;(window as any).api = {
@@ -133,6 +151,16 @@ export function installMockApi() {
         maxLockPeriodBlocks: 864000
       }),
     delegate: tx, undelegate: tx, cancelUnstakes: tx,
+    getMemoFee: () => wait(1),
+    inspectTx: (json: string) => { try { return wait(summarize(json)) } catch (e) { return Promise.reject(e) } },
+    signTx: (json: string, ids: number[]) => {
+      const m = JSON.parse(json)
+      const all = [...fileKeys, ...vaultKeys]
+      m.signed = [...m.signed, ...ids.map((id) => all.find((k) => k.id === id)!.address)]
+      const j = JSON.stringify(m)
+      return wait({ json: j, summary: summarize(j) }, 300)
+    },
+    broadcastTx: () => wait({ txid: 'f'.repeat(64), ok: true }, 400),
     sendTrx: tx, sendUsdt: tx, stake: tx, unstake: tx, withdrawUnfrozen: tx, vote: tx, updatePermissions: tx,
     explorerUrl: (id: string) => wait(`https://shasta.tronscan.org/#/transaction/${id}`)
   }
