@@ -161,18 +161,62 @@ export interface FeeEstimate {
   warnings: string[]
 }
 
+/** Coarse category used by the history filters. */
+export type HistoryKind =
+  | 'transfer'
+  | 'token'
+  | 'contract'
+  | 'stake'
+  | 'unstake'
+  | 'withdraw'
+  | 'delegate'
+  | 'reclaim'
+  | 'vote'
+  | 'claim'
+  | 'permission'
+  | 'other'
+
 export interface HistoryItem {
   txid: string
   time: number
+  /** raw contract type without the "Contract" suffix, or "<SYMBOL> transfer" for TRC20 */
   type: string
+  kind: HistoryKind
   direction: 'in' | 'out' | 'self' | 'other'
   counterparty?: string
+  /** display text, e.g. "25 trx", "1500 votes" */
   amount?: string
+  /** numeric amount + unit ("trx", token symbol in lower case, "votes"…) */
+  value?: number
+  unit?: string
+  /** TRC20 token contract (base58) for token transfers */
+  tokenContract?: string
+  /** true only for the network's real USDT contract (scam tokens also use the USDT symbol) */
+  isUsdt?: boolean
+  /** +1 received, -1 sent, 0 neither (stake, vote, self…) — only set for transfers and tokens */
+  sign: 1 | -1 | 0
   result: string
+  /** true when this address sent the tx, i.e. paid its fees */
+  paidByMe: boolean
+  /** total TRX burned = bandwidth + energy + other (memo, multisig, activation, permission update…) */
   feeTrx: number
+  netFeeTrx: number
+  energyFeeTrx: number
+  otherFeeTrx: number
   energy: number
   bandwidth: number
   note?: string
+}
+
+export interface BalancePoint {
+  /** YYYY-MM-DD (UTC) */
+  day: string
+  trx: number
+}
+
+export interface BalanceHistory {
+  points: BalancePoint[]
+  source: string
 }
 
 export interface HistoryPage {
@@ -275,6 +319,7 @@ export interface Api {
   rewardInfo(address: string): Promise<RewardInfo>
   claimRewards(id: number, opts?: TxOptions): Promise<TxResult>
   history(address: string, kind: 'all' | 'trc20', fingerprint?: string): Promise<HistoryPage>
+  balanceHistory(address: string, days: number): Promise<BalanceHistory>
   txReceipt(txid: string): Promise<TxReceipt>
   inspectTx(json: string): Promise<TxSummary>
   signTx(json: string, signerIds: number[]): Promise<{ json: string; summary: TxSummary }>

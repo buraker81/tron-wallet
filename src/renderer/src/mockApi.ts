@@ -83,6 +83,71 @@ const summarize = (json: string) => {
 const tx = (...args: any[]) => (args[args.length - 1]?.signers ? mockMultisig(args[args.length - 1]) : plainTx())
 const plainTx = () => wait({ txid: Math.random().toString(16).slice(2).padEnd(64, 'a'), ok: Math.random() > 0.3, message: 'CONTRACT_VALIDATE_ERROR: balance is not sufficient' }, 400)
 
+
+// ---- mock history: ~140 txs over ~100 days, deterministic ----
+const ME = 'TXyZjVcYurrbE43b2MfMtN34uA3tJL85zy'
+const USDT = 'TG3XXyExBkPp9nzdajDZsozEu4BkaSJozs'
+let seed = 7
+const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647)
+const base = (over: Record<string, unknown>) => ({
+  txid: Math.floor(rnd() * 1e16).toString(16).padStart(16, '0').repeat(4),
+  direction: 'out', sign: 0, result: 'SUCCESS', paidByMe: true,
+  feeTrx: 0, netFeeTrx: 0, energyFeeTrx: 0, otherFeeTrx: 0, energy: 0, bandwidth: 267, ...over
+})
+const others = ['TUjAyePMcSGPyeCcsNRjTLxZkYMTF9UyAA', 'TT2RHcg9JRU3LFx8sPukc9UizBYF8D44U2', 'TGNzrfuE14gMxBNwNVdzwFaMLHbm16rrKd']
+const mockAll: any[] = []
+const mockTrc20: any[] = []
+for (let i = 0; i < 140; i++) {
+  const time = Date.now() - Math.floor(rnd() * 100 * 864e5)
+  const r = rnd()
+  const cp = others[Math.floor(rnd() * 3)]
+  if (r < 0.35) {
+    const out = rnd() < 0.55
+    const v = Math.round(rnd() * 400 * 100) / 100
+    const burn = out && rnd() < 0.3 ? 0.267 : 0
+    mockAll.push(base({ time, type: 'Transfer', kind: 'transfer', direction: out ? 'out' : 'in', sign: out ? -1 : 1, value: v, unit: 'trx', amount: v + ' trx', counterparty: cp, paidByMe: out, feeTrx: burn, netFeeTrx: burn, note: rnd() < 0.15 ? 'invoice ' + i : undefined, ...(rnd() < 0.08 && out ? { feeTrx: 1.267, otherFeeTrx: 1 } : {}) }))
+  } else if (r < 0.6) {
+    const out = rnd() < 0.5
+    const v = Math.round(rnd() * 120 * 100) / 100
+    const txid = Math.floor(rnd() * 1e16).toString(16).padStart(16, '0').repeat(4)
+    const t20 = base({ txid, time, type: 'USDT transfer', kind: 'token', direction: out ? 'out' : 'in', sign: out ? -1 : 1, value: v, unit: 'usdt', amount: v + ' usdt', counterparty: cp, paidByMe: out, isUsdt: true, tokenContract: USDT, bandwidth: 0 })
+    mockTrc20.push(t20)
+    if (out) {
+      const fail = rnd() < 0.06
+      const ef = Math.round((fail ? 6.2 : rnd() < 0.5 ? 1.3 + rnd() * 2 : 0) * 1e4) / 1e4
+      mockAll.push(base({ txid, time, type: 'TriggerSmart', kind: 'contract', counterparty: USDT, amount: 'token transfer', feeTrx: ef, energyFeeTrx: ef, energy: fail ? 62000 : 13045 + Math.floor(rnd() * 20000), bandwidth: 345, result: fail ? 'OUT_OF_ENERGY' : 'SUCCESS' }))
+      if (fail) mockTrc20.pop()
+    }
+  } else if (r < 0.7) {
+    mockAll.push(base({ time, type: 'FreezeBalanceV2', kind: 'stake', value: 100 * Math.ceil(rnd() * 10), unit: 'trx', amount: 'stake' }))
+  } else if (r < 0.78) {
+    mockAll.push(base({ time, type: 'VoteWitness', kind: 'vote', value: 1500, unit: 'votes', amount: '1500 votes' }))
+  } else if (r < 0.84) {
+    const v = 100 * Math.ceil(rnd() * 5)
+    mockAll.push(base({ time, type: 'DelegateResource', kind: 'delegate', value: v, unit: 'trx', amount: v + ' trx energy', counterparty: cp }))
+  } else if (r < 0.88) {
+    mockAll.push(base({ time, type: 'WithdrawBalance', kind: 'claim', amount: 'claim' }))
+  } else if (r < 0.9) {
+    mockAll.push(base({ time, type: 'AccountPermissionUpdate', kind: 'permission', feeTrx: 100, otherFeeTrx: 100, bandwidth: 366 }))
+  } else if (r < 0.93) {
+    mockTrc20.push(base({ time, type: 'USDT transfer', kind: 'token', direction: 'in', sign: 1, value: 0.001, unit: 'usdt', amount: '0.001 usdt', counterparty: 'TPhishy1111111111111111111111111bb', paidByMe: false, isUsdt: false, tokenContract: 'TFakeUSDTcontract111111111111111aa', bandwidth: 0 }))
+  } else {
+    mockAll.push(base({ time, type: 'VoteWitness', kind: 'vote', direction: 'in', counterparty: cp, paidByMe: false, value: 20, unit: 'votes', amount: '20 votes' }))
+  }
+}
+mockAll.sort((a, b) => b.time - a.time)
+mockTrc20.sort((a, b) => b.time - a.time)
+// daily TRX balance for ~1000 days ending at the current mock balance
+const mockDaily: { day: string; trx: number }[] = []
+{
+  let bal = 4821.553
+  for (let i = 0; i < 1000; i++) {
+    mockDaily.unshift({ day: new Date(Date.now() - i * 864e5).toISOString().slice(0, 10), trx: Math.round(bal * 1e6) / 1e6 })
+    bal = Math.max(0, bal - (rnd() - 0.45) * 60)
+  }
+}
+void ME
+
 export function installMockApi() {
   ;(window as any).api = {
     listKeys: () => wait({ keys: keys(), path: '/Users/you/projects/tron_wallet/keys.json' }),
@@ -174,24 +239,9 @@ export function installMockApi() {
     claimRewards: plainTx,
     txReceipt: () => wait({ found: true, result: 'SUCCESS', feeTrx: 0.345, energy: 13045, bandwidth: 345, block: 70485000 }),
     history: (_a: string, kind: string) =>
-      wait({
-        source: 'api.shasta.trongrid.io',
-        fallback: false,
-        next: undefined,
-        items: kind === 'trc20'
-          ? [
-              { txid: 'a1'.repeat(32), time: Date.now() - 3600e3, type: 'USDT transfer', direction: 'in', counterparty: 'TGNzrfuE14gMxBNwNVdzwFaMLHbm16rrKd', amount: '5.5 usdt', result: 'SUCCESS', feeTrx: 0, energy: 0, bandwidth: 0 },
-              { txid: 'b2'.repeat(32), time: Date.now() - 86400e3, type: 'USDT transfer', direction: 'out', counterparty: vaultKeys[0].address, amount: '20 usdt', result: 'SUCCESS', feeTrx: 0, energy: 0, bandwidth: 0 }
-            ]
-          : [
-              { txid: 'c3'.repeat(32), time: Date.now() - 600e3, type: 'Transfer', direction: 'out', counterparty: fileKeys[1].address, amount: '25 trx', result: 'SUCCESS', feeTrx: 0, energy: 0, bandwidth: 267, note: 'treasury payout #42' },
-              { txid: 'd4'.repeat(32), time: Date.now() - 7200e3, type: 'TriggerSmartContract', direction: 'out', counterparty: 'TG3XXyExBkPp9nzdajDZsozEu4BkaSJozs', amount: 'token transfer', result: 'SUCCESS', feeTrx: 1.4095, energy: 64895, bandwidth: 345 },
-              { txid: 'e5'.repeat(32), time: Date.now() - 9000e3, type: 'DelegateResource', direction: 'out', counterparty: vaultKeys[0].address, amount: '400 trx energy', result: 'SUCCESS', feeTrx: 0, energy: 0, bandwidth: 280 },
-              { txid: 'f6'.repeat(32), time: Date.now() - 86400e3, type: 'VoteWitness', direction: 'out', amount: '1500 votes', result: 'SUCCESS', feeTrx: 0, energy: 0, bandwidth: 270 },
-              { txid: '07'.repeat(32), time: Date.now() - 90000e3, type: 'TriggerSmartContract', direction: 'out', counterparty: 'TG3XXyExBkPp9nzdajDZsozEu4BkaSJozs', amount: 'token transfer', result: 'OUT_OF_ENERGY', feeTrx: 6.2, energy: 62000, bandwidth: 345 },
-              { txid: '18'.repeat(32), time: Date.now() - 172800e3, type: 'Transfer', direction: 'in', counterparty: 'TGNzrfuE14gMxBNwNVdzwFaMLHbm16rrKd', amount: '5000 trx', result: 'SUCCESS', feeTrx: 0, energy: 0, bandwidth: 0 }
-            ]
-      }),
+      wait({ items: kind === 'trc20' ? mockTrc20 : mockAll, next: undefined, source: 'api.shasta.trongrid.io', fallback: false }, 300),
+    balanceHistory: (_a: string, days: number) =>
+      wait({ points: mockDaily.slice(-Math.min(days, mockDaily.length)), source: 'shastapi.tronscan.org' }, 400),
     inspectTx: (json: string) => { try { return wait(summarize(json)) } catch (e) { return Promise.reject(e) } },
     signTx: (json: string, ids: number[]) => {
       const m = JSON.parse(json)

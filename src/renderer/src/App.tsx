@@ -377,7 +377,7 @@ export default function App() {
                     busy={busy}
                   />
                 )}
-                {tab === 'history' && <History from={selected} keys={keys} network={network} />}
+                {tab === 'history' && <History from={selected} keys={keys} network={network} balances={bal} />}
                 {tab === 'permissions' && <Permissions from={selected} network={network} {...common} />}
               </section>
             </>

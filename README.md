@@ -50,9 +50,19 @@ Preview the UI in a normal browser with fake data: run `npm run dev` and open `h
   - fee parameters are read from the chain (`getChainParameters`)
 - **Receipts**: after a broadcast the log polls `getTransactionInfo` and shows the real result, fee, energy and
   bandwidth once the tx is in a block (or the failure reason, e.g. `out_of_energy`).
-- **History** tab: transactions and TRC20 transfers of the selected address from the TronGrid v1 API, with
-  direction, counterparty (named if it is one of your keys), amount, note, fee / energy / bandwidth and result.
-  Paged with *load more*. If the active node is not TronGrid, the built-in TronGrid host of the network is used.
+- **History** tab (selected address):
+  - loads the full history (TronGrid v1, 200 per page, up to 5,000 txs per feed, with progress and *stop*) and merges
+    the transaction feed with the TRC20 feed (your own TRC20 sends become one row with the token amount and the fees)
+  - range `30d · 90d · 1y · all` for everything below
+  - **balance chart**: daily TRX balance from the Tronscan API (`account/analysis`, end of day UTC), or USDT balance
+    rebuilt from the official USDT contract's transfers back from today's balance; shows start → end and the change
+  - **totals**: fees burned by txs this address sent (bandwidth / energy / other = memo, multi-signature, activation,
+    permission update), energy and bandwidth used, failed txs, TRX and USDT in / out / net
+  - **fees per day** (per week for ranges over 120 days) bar chart
+  - **filters**: tx type chips with counts, direction, result, search (txid, address, note, your key labels);
+    totals and the fee chart follow the filters
+  - tokens using the USDT symbol from another contract are flagged and left out of USDT figures
+  - if the active node is not TronGrid, the built-in TronGrid host of the network is used
 - **Voting rewards**: the vote tab shows unclaimed rewards and a *claim* button (WithdrawBalance, once per 24 h).
 
 ## Notes, signing and multisig

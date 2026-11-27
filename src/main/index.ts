@@ -95,6 +95,7 @@ app.whenReady().then(() => {
   handle('rewardInfo', tron.rewardInfo)
   handle('claimRewards', tron.claimRewards)
   handle('history', hist.history)
+  handle('balanceHistory', hist.balanceHistory)
   handle('txReceipt', hist.txReceipt)
   handle('inspectTx', multisig.inspectTx)
   handle('signTx', multisig.signTx)
