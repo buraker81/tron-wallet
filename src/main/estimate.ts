@@ -9,10 +9,10 @@
  * - Energy (smart contracts): available energy is used first, the rest is burned at getEnergyFee per unit.
  * - Fixed extras: memo fee, multi-signature fee (> 1 signature), account permission update fee.
  */
-import { getAddress } from './key'
+import { getAddress, listKeys } from './key'
 import { NETWORKS } from './networks'
 import { SUN, getNetwork, tw } from './client'
-import { prepare } from './multisig'
+import { prepare, signersFor } from './multisig'
 import { BUILDERS, USDT_FEE_LIMIT_TRX } from './tron'
 import type { FeeEstimate, TxAction, TxOptions } from '../shared/types'
 
@@ -30,7 +30,9 @@ export async function estimateTx(action: TxAction, id: number, args: any[], opts
   const tx = await prepare(t, tx0, opts)
   const p = (k: string, d = 0) => Number(params.find((x: any) => x.key === k)?.value ?? d)
 
-  const sigs = Math.max(1, opts?.signers?.length ?? 1)
+  // signature count of the real tx (explicit signers, or what automatic selection would pick)
+  const signerIds = await signersFor(t, tx, id, opts).catch(() => [id])
+  const sigs = Math.max(1, new Set(signerIds.map((sid) => listKeys().find((k) => k.id === sid)?.address)).size)
   const bytes = tx.raw_data_hex.length / 2 + 3 + sigs * SIG_BYTES + RESULT_BYTES
   const staked = Math.max(0, (res?.NetLimit ?? 0) - (res?.NetUsed ?? 0))
   const free = Math.max(0, (res?.freeNetLimit ?? 0) - (res?.freeNetUsed ?? 0))

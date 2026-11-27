@@ -63,8 +63,11 @@ Every transaction form has:
   `getMemoFee`, 1 TRX on Shasta/mainnet at the time of writing).
 - **signing** (collapsed by default):
   - *permission id*: `0` owner, `2+` active permissions.
-  - *signers*: which keys sign (`keys.json` or vault). Empty means the account's own key. The account itself can be
-    watch-only, so you can operate a multisig account whose keys are held by others.
+  - *signers*: which keys sign (`keys.json` or vault). **Empty = automatic**: the app reads the account's permission
+    on chain and uses the keys it holds that belong to it (own key first, then heavier keys) until the threshold is
+    reached. So if you moved an account's owner to another key you hold, just send as usual: the signing line shows
+    e.g. `auto: #2 TUjAye… (owner 1/1)`. If you hold only some of a multisig's keys, it signs with those and keeps the
+    tx pending. The account itself can be watch-only.
   - *valid for*: tx lifetime in minutes (default ~1 min, max 24 h). Raise it when other people still need to sign.
 
 Every signer is checked against the tx's permission before signing. If the signatures reach the permission threshold

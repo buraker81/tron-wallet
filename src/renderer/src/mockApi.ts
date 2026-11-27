@@ -138,7 +138,11 @@ export function installMockApi() {
       ),
     getPermissions: (address: string) =>
       wait({
-        owner: { type: 0, id: 0, permission_name: 'owner', threshold: 1, keys: [{ address, weight: 1 }] },
+        // #1's owner was moved to #2 (the scenario: owner = another keys.json address)
+        owner: {
+          type: 0, id: 0, permission_name: 'owner', threshold: 1,
+          keys: [{ address: address === fileKeys[0].address ? fileKeys[1].address : address, weight: 1 }]
+        },
         witness: null,
         actives: [{ type: 2, id: 2, permission_name: 'active0', threshold: 1, operations: DEFAULT_OPS, keys: [{ address, weight: 1 }] }]
       }),

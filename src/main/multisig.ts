@@ -8,7 +8,8 @@
  * signed elsewhere (TronWeb, wallet-cli) and brought back.
  */
 import { TronWeb, utils } from 'tronweb'
-import { getAddress, getKey } from './key'
+import { getAddress, getKey, listKeys } from './key'
+import { pickSigners } from '../shared/signers'
 import { SUN, getNetwork, nodeMessage, toBase58, tw } from './client'
 import type { TxOptions, TxResult, TxSummary } from '../shared/types'
 
@@ -49,24 +50,35 @@ async function signWeight(t: TronWeb, tx: any): Promise<any> {
 
 const lower = (a: string) => TronWeb.address.toHex(a).toLowerCase()
 
-/** Sign `tx` with each key id after checking it belongs to the tx's permission and has not signed yet. */
-async function signWith(t: TronWeb, tx: any, signerIds: number[]): Promise<any> {
+/**
+ * Sign `tx` with each key id after checking it belongs to the tx's permission and has not signed yet.
+ * Pass `w` (a getSignWeight result for this tx) to avoid fetching it again.
+ * Returns the signed tx and the weight it has now.
+ */
+async function signWith(
+  t: TronWeb,
+  tx: any,
+  signerIds: number[],
+  w?: any
+): Promise<{ tx: any; weight: number; threshold: number }> {
   if (signerIds.length === 0) throw new Error('Pick at least one signer')
-  const w = await signWeight(t, tx)
+  w ??= await signWeight(t, tx)
   const permKeys = new Map<string, number>(
     (w.permission?.keys ?? []).map((k: any) => [String(k.address).toLowerCase(), Number(k.weight)])
   )
   const approved = new Set<string>((w.approved_list ?? []).map((a: string) => String(a).toLowerCase()))
   const permName = w.permission?.permission_name ?? `id ${tx.raw_data.contract[0].Permission_id ?? 0}`
+  let weight = Number(w.current_weight ?? 0)
   for (const id of signerIds) {
     const key = getKey(id)
     const hex = lower(key.address)
     if (!permKeys.has(hex)) throw new Error(`#${id} ${key.address} is not a key of permission "${permName}"`)
-    if (approved.has(hex)) throw new Error(`#${id} ${key.address} already signed this transaction`)
+    if (approved.has(hex)) continue // same key listed twice (keys.json + vault), or already signed
     tx = await t.trx.sign(tx, key.privateKey, false, true)
     approved.add(hex)
+    weight += permKeys.get(hex)!
   }
-  return tx
+  return { tx, weight, threshold: Number(w.permission?.threshold ?? 1) }
 }
 
 async function broadcast(t: TronWeb, tx: any): Promise<TxResult> {
@@ -75,12 +87,8 @@ async function broadcast(t: TronWeb, tx: any): Promise<TxResult> {
   return res?.result ? { txid, ok: true } : { txid, ok: false, message: nodeMessage(res, 'Broadcast failed') }
 }
 
-/** Broadcast if the signatures reach the threshold, otherwise hand back the partially signed tx. */
-async function finish(t: TronWeb, tx: any): Promise<TxResult> {
-  const w = await signWeight(t, tx)
-  if (w.result?.code === 'ENOUGH_PERMISSION') return broadcast(t, tx)
-  const threshold = Number(w.permission?.threshold ?? 1)
-  const weight = Number(w.current_weight ?? 0)
+/** Partially signed: hand the tx back so more signatures can be added in sign-tx. */
+function pendingResult(tx: any, weight: number, threshold: number): TxResult {
   return {
     txid: tx.txID,
     ok: false,
@@ -104,14 +112,40 @@ export async function execute(
   const owner = getAddress(id)
   let tx = await build(t, owner)
   tx = await prepare(t, tx, opts)
-  const signers = opts?.signers?.length ? [...new Set(opts.signers)] : [id]
-  const simple = signers.length === 1 && signers[0] === id && !opts?.permissionId
-  if (simple) {
-    tx = await t.trx.sign(tx, getKey(id).privateKey)
-    return broadcast(t, tx)
+  // one permission lookup serves signer choice, signer checks and the weight
+  const w = await signWeight(t, tx).catch((e: Error) => {
+    if (/does not exist/i.test(e.message)) {
+      throw new Error(`Account ${owner} is not activated yet (no TRX received). Fund it first.`)
+    }
+    throw e
+  })
+  const signers = opts?.signers?.length ? [...new Set(opts.signers)] : autoSigners(w, id)
+  const signed = await signWith(t, tx, signers, w)
+  if (signed.weight >= signed.threshold) return broadcast(t, signed.tx)
+  return pendingResult(signed.tx, signed.weight, signed.threshold)
+}
+
+/**
+ * No signers chosen: use the keys this app holds for the tx's permission (owner unless a permission id is set).
+ * This covers accounts whose owner was moved to another key, and multisig accounts where we hold several keys.
+ */
+/** Signer ids a tx would use (explicit or automatic). Used by the fee estimate. */
+export async function signersFor(t: TronWeb, tx: any, id: number, opts?: TxOptions): Promise<number[]> {
+  if (opts?.signers?.length) return [...new Set(opts.signers)]
+  return autoSigners(await signWeight(t, tx), id)
+}
+
+function autoSigners(w: any, id: number): number[] {
+  const permKeys = (w.permission?.keys ?? []).map((k: any) => ({ address: toBase58(k.address), weight: Number(k.weight) }))
+  const pick = pickSigners(permKeys, Number(w.permission?.threshold ?? 1), listKeys(), id)
+  if (pick.ids.length === 0) {
+    const name = w.permission?.permission_name ?? 'owner'
+    throw new Error(
+      `No key in this app can sign for permission "${name}" (keys: ${permKeys.map((k: any) => k.address).join(', ')}). ` +
+        'Add one of these keys (keys.json or vault, unlock it if locked).'
+    )
   }
-  tx = await signWith(t, tx, signers)
-  return finish(t, tx)
+  return pick.ids
 }
 
 // ---------- standalone tx tools (sign-tx tab) ----------
@@ -187,7 +221,7 @@ export async function signTx(json: string, signerIds: number[]): Promise<{ json:
   const t = tw()
   let tx = parseTx(json)
   if (tx.raw_data.expiration <= Date.now()) throw new Error('Transaction has expired')
-  tx = await signWith(t, tx, signerIds)
+  tx = (await signWith(t, tx, signerIds)).tx
   return { json: JSON.stringify(tx), summary: await summarize(t, tx) }
 }
 

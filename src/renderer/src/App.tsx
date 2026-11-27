@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Balances, NetworkId, NodeConfig, NodeState, PublicKey, TxReceipt, TxResult, VaultStatus } from '../../shared/types'
+import type { AccountPermissions, Balances, NetworkId, NodeConfig, NodeState, PublicKey, TxReceipt, TxResult, VaultStatus } from '../../shared/types'
 import { TxContext, fmt, short } from './ui'
 import { SendTrx, SendUsdt } from './components/Send'
 import { Stake } from './components/Stake'
@@ -49,6 +49,7 @@ export default function App() {
   const [pending, setPending] = useState<PendingEntry[]>([])
   const [signJson, setSignJson] = useState('')
   const [memoFee, setMemoFee] = useState(0)
+  const [perms, setPerms] = useState<AccountPermissions>()
   const [busy, setBusy] = useState(false)
   const [confirm, setConfirm] = useState<{ label: string; resolve: (ok: boolean) => void }>()
   const [copied, setCopied] = useState<string>()
@@ -197,6 +198,21 @@ export default function App() {
     window.api.getMemoFee().then(setMemoFee).catch(() => setMemoFee(0))
   }, [network])
 
+  // on-chain permissions of the selected account (who can sign for it); reloaded after txs via balances
+  const selectedBalance = selected ? balances[selected.address] : undefined
+  useEffect(() => {
+    setPerms(undefined)
+    if (!selected) return
+    let alive = true
+    window.api
+      .getPermissions(selected.address)
+      .then((p) => alive && setPerms(p))
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [selected?.address, network, selectedBalance])
+
   const copy = (addr: string) => {
     navigator.clipboard.writeText(addr)
     setCopied(addr)
@@ -209,7 +225,7 @@ export default function App() {
   const activeNode = nodes?.nodes.find((n) => n.id === nodes.selected[network])
 
   return (
-    <TxContext.Provider value={{ keys, from: selected, memoFee }}>
+    <TxContext.Provider value={{ keys, from: selected, memoFee, perms }}>
     <div className={`app ${network}`}>
       {network === 'mainnet' && <div className="mainnet-bar">mainnet: transactions are real</div>}
       {activeNode && isKeylessPublicGrid(activeNode, nodes?.envKey) && (
