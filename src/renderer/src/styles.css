@@ -351,3 +351,16 @@ input.search { width: 280px; }
 /* selected segment / chip keeps its fill on hover (the generic button:hover rule used to wash it out) */
 .seg button.on:hover:not(:disabled), button.chip.on:hover:not(:disabled) { background: var(--ink); color: var(--bg); }
 .app.mainnet .seg button.on:hover:not(:disabled) { background: var(--err); }
+
+/* ---------- fees by cause ---------- */
+.fees-panel { grid-column: 1 / -1; gap: 4px; }
+.fees-panel .panel-head { margin-bottom: 4px; }
+.fee-group { display: flex; gap: 12px; align-items: baseline; margin-top: 6px; padding-bottom: 3px; border-bottom: 1px solid var(--line-soft); }
+.fee-group-title { color: var(--ink-2); font-weight: 500; }
+.fee-row { display: grid; grid-template-columns: 190px 130px 1fr 220px; gap: 12px; align-items: center; padding: 2px 0; }
+.fee-row.indent .fee-label { padding-left: 14px; }
+.fee-row.zero { color: var(--muted); }
+.fee-value { text-align: right; }
+.fee-share { display: flex; gap: 8px; align-items: center; }
+.share-bar { flex: 1; height: 6px; background: var(--line-soft); position: relative; }
+.share-bar > span { position: absolute; inset: 0 auto 0 0; background: var(--ink-2); }

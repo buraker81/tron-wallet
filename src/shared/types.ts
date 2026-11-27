@@ -1,3 +1,5 @@
+import type { FeeSplit } from './txtypes'
+
 export type NetworkId = 'shasta' | 'nile' | 'mainnet'
 export type Resource = 'ENERGY' | 'BANDWIDTH'
 
@@ -161,20 +163,8 @@ export interface FeeEstimate {
   warnings: string[]
 }
 
-/** Coarse category used by the history filters. */
-export type HistoryKind =
-  | 'transfer'
-  | 'token'
-  | 'contract'
-  | 'stake'
-  | 'unstake'
-  | 'withdraw'
-  | 'delegate'
-  | 'reclaim'
-  | 'vote'
-  | 'claim'
-  | 'permission'
-  | 'other'
+/** Tx type key used by the history filters, see shared/txtypes.ts (e.g. 'transfer', 'delegate', 'account-create'). */
+export type HistoryKind = string
 
 export interface HistoryItem {
   txid: string
@@ -198,11 +188,11 @@ export interface HistoryItem {
   result: string
   /** true when this address sent the tx, i.e. paid its fees */
   paidByMe: boolean
-  /** total TRX burned = bandwidth + energy + other (memo, multisig, activation, permission update…) */
+  /** total TRX burned; `fees` says why */
   feeTrx: number
-  netFeeTrx: number
-  energyFeeTrx: number
-  otherFeeTrx: number
+  fees: FeeSplit
+  /** a TRX transfer that created the receiving account */
+  createdAccount?: boolean
   energy: number
   bandwidth: number
   note?: string
@@ -318,7 +308,12 @@ export interface Api {
   estimateTx(action: TxAction, id: number, args: unknown[], opts?: TxOptions): Promise<FeeEstimate>
   rewardInfo(address: string): Promise<RewardInfo>
   claimRewards(id: number, opts?: TxOptions): Promise<TxResult>
-  history(address: string, kind: 'all' | 'trc20', fingerprint?: string): Promise<HistoryPage>
+  history(
+    address: string,
+    kind: 'all' | 'trc20',
+    fingerprint?: string,
+    opts?: { usdtOnly?: boolean; since?: number }
+  ): Promise<HistoryPage>
   balanceHistory(address: string, days: number): Promise<BalanceHistory>
   txReceipt(txid: string): Promise<TxReceipt>
   inspectTx(json: string): Promise<TxSummary>

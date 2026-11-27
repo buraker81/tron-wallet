@@ -1,5 +1,6 @@
 // Pure helpers for the history tab: merging feeds, ranges, totals and chart series. No React, easy to test.
 import type { HistoryItem, HistoryKind } from '../../../../shared/types'
+import { ZERO_FEES, type FeeSplit } from '../../../../shared/txtypes'
 
 export const DAY = 86_400_000
 
@@ -10,21 +11,6 @@ export const RANGES: { id: RangeId; label: string; days: number }[] = [
   { id: '1y', label: '1y', days: 365 },
   // Tronscan returns up to ~1000 days of daily balances
   { id: 'all', label: 'all', days: 1000 }
-]
-
-export const KIND_ORDER: HistoryKind[] = [
-  'transfer',
-  'token',
-  'contract',
-  'stake',
-  'unstake',
-  'withdraw',
-  'delegate',
-  'reclaim',
-  'vote',
-  'claim',
-  'permission',
-  'other'
 ]
 
 /** UTC calendar day, the same convention Tronscan uses for its daily points. */
@@ -40,10 +26,10 @@ export function mergeFeeds(all: HistoryItem[], trc20: HistoryItem[]): HistoryIte
   const extra: HistoryItem[] = []
   for (const t of trc20) {
     const row = byId.get(t.txid)
-    if (row && row.kind === 'contract') {
+    if (row && row.kind === 'contract-call') {
       byId.set(t.txid, {
         ...row,
-        kind: 'token',
+        kind: 'trc20',
         type: t.type,
         amount: t.amount,
         value: t.value,
@@ -103,9 +89,10 @@ export interface Totals {
   txs: number
   paid: number
   fee: number
-  netFee: number
-  energyFee: number
-  otherFee: number
+  fees: FeeSplit
+  /** txs that burned TRX for each cause */
+  feeTxs: Record<keyof FeeSplit, number>
+  accountsCreated: number
   energy: number
   bandwidth: number
   trxIn: number
@@ -117,13 +104,14 @@ export interface Totals {
 
 /** Fees and resources count only txs this address sent (it paid for them). Flows count TRX transfers and real USDT. */
 export function totals(items: HistoryItem[]): Totals {
+  const zeroCounts = Object.fromEntries(Object.keys(ZERO_FEES).map((k) => [k, 0])) as Record<keyof FeeSplit, number>
   const t: Totals = {
     txs: items.length,
     paid: 0,
     fee: 0,
-    netFee: 0,
-    energyFee: 0,
-    otherFee: 0,
+    fees: { ...ZERO_FEES },
+    feeTxs: zeroCounts,
+    accountsCreated: 0,
     energy: 0,
     bandwidth: 0,
     trxIn: 0,
@@ -137,14 +125,16 @@ export function totals(items: HistoryItem[]): Totals {
     if (x.paidByMe) {
       t.paid++
       t.fee += x.feeTrx
-      t.netFee += x.netFeeTrx
-      t.energyFee += x.energyFeeTrx
-      t.otherFee += x.otherFeeTrx
+      for (const k of Object.keys(x.fees) as (keyof FeeSplit)[]) {
+        t.fees[k] += x.fees[k]
+        if (x.fees[k] > 0) t.feeTxs[k]++
+      }
+      if (x.createdAccount) t.accountsCreated++
       t.energy += x.energy
       t.bandwidth += x.bandwidth
     }
     if (x.result !== 'SUCCESS' || !x.value) continue
-    if (x.kind === 'transfer' && x.unit === 'trx') {
+    if (x.type === 'Transfer') {
       if (x.sign > 0) t.trxIn += x.value
       if (x.sign < 0) t.trxOut += x.value
     }
@@ -195,9 +185,7 @@ export interface FeeBucket {
   /** first day of the bucket */
   start: string
   fee: number
-  netFee: number
-  energyFee: number
-  otherFee: number
+  fees: FeeSplit
   txs: number
 }
 
@@ -208,7 +196,7 @@ export function feeBuckets(items: HistoryItem[], days: string[]): FeeBucket[] {
   const buckets: FeeBucket[] = []
   const index = new Map<string, FeeBucket>()
   for (let i = 0; i < days.length; i += size) {
-    const b: FeeBucket = { key: days[i], start: days[i], fee: 0, netFee: 0, energyFee: 0, otherFee: 0, txs: 0 }
+    const b: FeeBucket = { key: days[i], start: days[i], fee: 0, fees: { ...ZERO_FEES }, txs: 0 }
     buckets.push(b)
     for (let j = i; j < Math.min(i + size, days.length); j++) index.set(days[j], b)
   }
@@ -217,9 +205,7 @@ export function feeBuckets(items: HistoryItem[], days: string[]): FeeBucket[] {
     const b = index.get(dayKey(x.time))
     if (!b) continue
     b.fee += x.feeTrx
-    b.netFee += x.netFeeTrx
-    b.energyFee += x.energyFeeTrx
-    b.otherFee += x.otherFeeTrx
+    for (const k of Object.keys(x.fees) as (keyof FeeSplit)[]) b.fees[k] += x.fees[k]
     b.txs++
   }
   return buckets

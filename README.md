@@ -55,11 +55,21 @@ Preview the UI in a normal browser with fake data: run `npm run dev` and open `h
     the transaction feed with the TRC20 feed (your own TRC20 sends become one row with the token amount and the fees)
   - range `30d · 90d · 1y · all` for everything below
   - **balance chart**: daily TRX balance from the Tronscan API (`account/analysis`, end of day UTC), or USDT balance
-    rebuilt from the official USDT contract's transfers back from today's balance; shows start → end and the change
-  - **totals**: fees burned by txs this address sent (bandwidth / energy / other = memo, multi-signature, activation,
-    permission update), energy and bandwidth used, failed txs, TRX and USDT in / out / net
+    rebuilt from today's balance using the official USDT contract's transfers of the range. These are loaded on their
+    own (TronGrid `contract_address` + `min_timestamp`, up to 20,000), so the 5,000 item cap of the general list does
+    not cut the chart short; if an address has more USDT transfers than that, the chart starts at the oldest loaded
+    day and says so. Shows start → end and the change
+  - **fees burned** by txs this address sent, by cause:
+    - resource shortage: bandwidth / energy burned because staked + free resources did not cover the tx
+    - fixed fees: account creation (TRX to a new address: 1 TRX system fee + its 0.1 TRX bandwidth fee, with the
+      number of accounts created), memo, multi-signature, permission update, other
+    TronGrid only reports total / bandwidth / energy fee per tx; the rest is attributed from the tx (note, signature
+    count, contract type, new-account transfer) using the network's current fee parameters
+  - **totals**: energy and bandwidth used, failed txs, TRX and USDT in / out / net
   - **fees per day** (per week for ranges over 120 days) bar chart
-  - **filters**: tx type chips with counts, direction, result, search (txid, address, note, your key labels);
+  - **filters**: one chip per tx type with counts (trx transfer, account create, trc20 transfer, contract call,
+    stake, unstake, cancel unstakes, withdraw unstaked, delegate, undelegate, vote, claim rewards, permission update,
+    …), direction, result, search (txid, address, note, your key labels);
     totals and the fee chart follow the filters
   - tokens using the USDT symbol from another contract are flagged and left out of USDT figures
   - if the active node is not TronGrid, the built-in TronGrid host of the network is used

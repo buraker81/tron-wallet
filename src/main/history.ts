@@ -8,6 +8,7 @@ import { activeNode, builtinNode, nodeHeaders, nodePolicy, nodeQueueKey, nodeUrl
 import { checkedFetch, throttled } from './ratelimit'
 import { SUN, getNetwork, toBase58, tw } from './client'
 import { NETWORKS } from './networks'
+import { ZERO_FEES, typeKey, type FeeSplit } from '../shared/txtypes'
 import type {
   BalanceHistory,
   BalancePoint,
@@ -39,34 +40,78 @@ const utf8 = (hex?: string) => {
   }
 }
 
-const KIND: Record<string, HistoryKind> = {
-  Transfer: 'transfer',
-  TransferAsset: 'token',
-  // contract types arrive with the trailing "Contract" removed: TriggerSmartContract -> TriggerSmart
-  TriggerSmart: 'contract',
-  CreateSmart: 'contract',
-  FreezeBalanceV2: 'stake',
-  FreezeBalance: 'stake',
-  UnfreezeBalanceV2: 'unstake',
-  UnfreezeBalance: 'unstake',
-  CancelAllUnfreezeV2: 'unstake',
-  WithdrawExpireUnfreeze: 'withdraw',
-  DelegateResource: 'delegate',
-  UnDelegateResource: 'reclaim',
-  VoteWitness: 'vote',
-  WithdrawBalance: 'claim',
-  AccountPermissionUpdate: 'permission'
+const sun = (v: unknown) => Number(v ?? 0) / SUN
+const round = (n: number) => Math.round(n * SUN) / SUN
+
+interface FeeParams {
+  createAccount: number // bandwidth fee when creating an account (0.1 TRX)
+  createNewAccount: number // system fee for a new account (1 TRX)
+  memo: number
+  multisig: number
+  permission: number
 }
 
-const sun = (v: unknown) => Number(v ?? 0) / SUN
+const paramCache = new Map<string, { at: number; p: FeeParams }>()
 
-function fromTx(me: string, d: any): HistoryItem {
+/** Current fee parameters of the network (cached 10 min). Used to explain what each burned TRX was for. */
+async function feeParams(): Promise<FeeParams> {
+  const net = getNetwork()
+  const hit = paramCache.get(net)
+  if (hit && Date.now() - hit.at < 600_000) return hit.p
+  const list: any[] = await tw().trx.getChainParameters()
+  const v = (k: string, d: number) => sun(list.find((x) => x.key === k)?.value ?? d)
+  const p: FeeParams = {
+    createAccount: v('getCreateAccountFee', 100_000),
+    createNewAccount: v('getCreateNewAccountFeeInSystemContract', 1_000_000),
+    memo: v('getMemoFee', 1_000_000),
+    multisig: v('getMultiSignFee', 1_000_000),
+    permission: v('getUpdateAccountPermissionFee', 100_000_000)
+  }
+  paramCache.set(net, { at: Date.now(), p })
+  return p
+}
+
+/**
+ * Split a tx's burned TRX by cause. TronGrid gives total fee, net_fee (bandwidth) and energy_fee; the rest is
+ * attributed from the tx itself: memo (raw_data.data), multi-signature (> 1 signature), permission update,
+ * account creation (TRX transfer / AccountCreate whose remaining fee covers the system fee; its 0.1 TRX
+ * bandwidth fee is moved from bandwidth to account creation). Whatever is left is "other".
+ */
+function splitFees(d: any, contract: string, p: FeeParams): { fees: FeeSplit; createdAccount: boolean } {
+  const fee = sun(d.ret?.[0]?.fee)
+  let bandwidth = sun(d.net_fee)
+  const energy = sun(d.energy_fee)
+  let rest = round(fee - bandwidth - energy)
+  const take = (amount: number, when: boolean) => {
+    if (!when || amount <= 0 || rest + 1e-9 < amount) return 0
+    rest = round(rest - amount)
+    return amount
+  }
+  const memo = take(p.memo, !!d.raw_data?.data)
+  const multisig = take(p.multisig, (d.signature?.length ?? 0) > 1)
+  const permission = take(p.permission, contract === 'AccountPermissionUpdate')
+  let activation = take(p.createNewAccount, contract === 'Transfer' || contract === 'AccountCreate' || contract === 'TransferAsset')
+  const createdAccount = activation > 0
+  if (createdAccount && Math.abs(bandwidth - p.createAccount) < 1e-9) {
+    // creating an account burns getCreateAccountFee as bandwidth when the sender has no staked bandwidth
+    activation = round(activation + bandwidth)
+    bandwidth = 0
+  }
+  return {
+    fees: { bandwidth, energy, activation, memo, multisig, permission, other: Math.max(0, rest) },
+    createdAccount
+  }
+}
+
+function fromTx(me: string, d: any, p: FeeParams): HistoryItem {
   const c = d.raw_data?.contract?.[0]
   const v = c?.parameter?.value ?? {}
   const owner = v.owner_address ? toBase58(v.owner_address) : undefined
   let to = v.to_address ? toBase58(v.to_address) : v.receiver_address ? toBase58(v.receiver_address) : undefined
+  if (!to && v.account_address) to = toBase58(v.account_address) // AccountCreate
   const type = String(c?.type ?? 'Unknown').replace(/Contract$/, '')
-  const kind = KIND[type] ?? 'other'
+  const { fees, createdAccount } = splitFees(d, type, p)
+  const kind: HistoryKind = createdAccount || type === 'AccountCreate' ? 'account-create' : typeKey(type)
   let value: number | undefined
   let unit: string | undefined
   let amount: string | undefined
@@ -90,7 +135,7 @@ function fromTx(me: string, d: any): HistoryItem {
     value = v.votes.reduce((s: number, x: any) => s + x.vote_count, 0)
     unit = 'votes'
   }
-  if (c?.type === 'TriggerSmartContract') {
+  if (type === 'TriggerSmart') {
     to = v.contract_address ? toBase58(v.contract_address) : undefined
     value = undefined
     unit = undefined
@@ -101,12 +146,9 @@ function fromTx(me: string, d: any): HistoryItem {
 
   // txs started by someone else that list this address (votes for an SR, delegations to us…) count as incoming
   const direction = owner === me ? dir(me, owner, to) : 'in'
-  const moves = kind === 'transfer' || kind === 'token'
+  const moves = type === 'Transfer' || type === 'TransferAsset'
   const sign: HistoryItem['sign'] = !moves || direction === 'self' ? 0 : direction === 'out' ? -1 : 1
 
-  const fee = sun(d.ret?.[0]?.fee)
-  const netFee = sun(d.net_fee)
-  const energyFee = sun(d.energy_fee)
   return {
     txid: d.txID,
     time: d.block_timestamp,
@@ -120,11 +162,9 @@ function fromTx(me: string, d: any): HistoryItem {
     sign,
     result: d.ret?.[0]?.contractRet ?? 'SUCCESS',
     paidByMe: owner === me,
-    feeTrx: fee,
-    netFeeTrx: netFee,
-    energyFeeTrx: energyFee,
-    // memo, multi-signature, account activation, permission update… (whatever is not bandwidth/energy)
-    otherFeeTrx: Math.max(0, Math.round((fee - netFee - energyFee) * SUN) / SUN),
+    feeTrx: sun(d.ret?.[0]?.fee),
+    fees,
+    createdAccount,
     energy: Number(d.energy_usage_total ?? 0),
     bandwidth: Number(d.net_usage ?? 0),
     note: utf8(d.raw_data?.data)
@@ -140,7 +180,7 @@ function fromTrc20(me: string, d: any): HistoryItem {
     txid: d.transaction_id,
     time: d.block_timestamp,
     type: `${symbol} ${String(d.type ?? 'Transfer').toLowerCase()}`,
-    kind: 'token',
+    kind: 'trc20',
     direction,
     counterparty: d.from === me ? d.to : d.from,
     amount: `${value} ${symbol.toLowerCase()}`,
@@ -153,30 +193,41 @@ function fromTrc20(me: string, d: any): HistoryItem {
     // fees are on the contract call itself (the 'all' feed row with the same txid)
     paidByMe: d.from === me,
     feeTrx: 0,
-    netFeeTrx: 0,
-    energyFeeTrx: 0,
-    otherFeeTrx: 0,
+    fees: { ...ZERO_FEES },
     energy: 0,
     bandwidth: 0
   }
 }
 
-export async function history(address: string, kind: 'all' | 'trc20', fingerprint?: string): Promise<HistoryPage> {
+/**
+ * One page of history. For the TRC20 feed, `opts.usdtOnly` limits it to the network's USDT contract and
+ * `opts.since` (ms) stops at that time, so the USDT balance chart can cover its whole range without loading
+ * every other transfer.
+ */
+export async function history(
+  address: string,
+  kind: 'all' | 'trc20',
+  fingerprint?: string,
+  opts?: { usdtOnly?: boolean; since?: number }
+): Promise<HistoryPage> {
   if (!TronWeb.isAddress(address)) throw new Error('Invalid address')
   const { node, fallback } = source()
   const base = nodeUrl(node)
   const url = new URL(`${base}/v1/accounts/${address}/transactions${kind === 'trc20' ? '/trc20' : ''}`)
   url.searchParams.set('limit', String(PAGE))
   if (fingerprint) url.searchParams.set('fingerprint', fingerprint)
+  if (kind === 'trc20' && opts?.usdtOnly) url.searchParams.set('contract_address', NETWORKS[getNetwork()].usdt)
+  if (opts?.since) url.searchParams.set('min_timestamp', String(Math.floor(opts.since)))
   const res = await throttled(nodeQueueKey(node), nodePolicy(node), () =>
     checkedFetch(url, { headers: nodeHeaders(node), signal: AbortSignal.timeout(15000) })
   )
   if (!res.ok) throw new Error(`History request failed: HTTP ${res.status}`)
   const body: any = await res.json()
   if (body?.success === false) throw new Error(body?.error ?? 'History request failed')
+  const params = kind === 'all' ? await feeParams() : (undefined as unknown as FeeParams)
   const items = (body.data ?? [])
     .filter((d: any) => kind === 'trc20' || d.raw_data) // skip internal txs in the mixed feed
-    .map((d: any) => (kind === 'trc20' ? fromTrc20(address, d) : fromTx(address, d)))
+    .map((d: any) => (kind === 'trc20' ? fromTrc20(address, d) : fromTx(address, d, params)))
   return { items, next: body.meta?.fingerprint, source: new URL(node.fullHost.replace('{key}', 'k')).host, fallback }
 }
 

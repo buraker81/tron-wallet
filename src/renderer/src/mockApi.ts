@@ -92,7 +92,8 @@ const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647)
 const base = (over: Record<string, unknown>) => ({
   txid: Math.floor(rnd() * 1e16).toString(16).padStart(16, '0').repeat(4),
   direction: 'out', sign: 0, result: 'SUCCESS', paidByMe: true,
-  feeTrx: 0, netFeeTrx: 0, energyFeeTrx: 0, otherFeeTrx: 0, energy: 0, bandwidth: 267, ...over
+  feeTrx: 0, energy: 0, bandwidth: 267, ...over,
+  fees: { bandwidth: 0, energy: 0, activation: 0, memo: 0, multisig: 0, permission: 0, other: 0, ...((over.fees as object) ?? {}) }
 })
 const others = ['TUjAyePMcSGPyeCcsNRjTLxZkYMTF9UyAA', 'TT2RHcg9JRU3LFx8sPukc9UizBYF8D44U2', 'TGNzrfuE14gMxBNwNVdzwFaMLHbm16rrKd']
 const mockAll: any[] = []
@@ -105,36 +106,41 @@ for (let i = 0; i < 140; i++) {
     const out = rnd() < 0.55
     const v = Math.round(rnd() * 400 * 100) / 100
     const burn = out && rnd() < 0.3 ? 0.267 : 0
-    mockAll.push(base({ time, type: 'Transfer', kind: 'transfer', direction: out ? 'out' : 'in', sign: out ? -1 : 1, value: v, unit: 'trx', amount: v + ' trx', counterparty: cp, paidByMe: out, feeTrx: burn, netFeeTrx: burn, note: rnd() < 0.15 ? 'invoice ' + i : undefined, ...(rnd() < 0.08 && out ? { feeTrx: 1.267, otherFeeTrx: 1 } : {}) }))
+    const activate = out && rnd() < 0.15
+    const memo = out && rnd() < 0.12
+    const fee = burn + (activate ? 1.1 : 0) + (memo ? 1 : 0)
+    mockAll.push(base({ time, type: 'Transfer', kind: activate ? 'account-create' : 'transfer', createdAccount: activate, direction: out ? 'out' : 'in', sign: out ? -1 : 1, value: v, unit: 'trx', amount: v + ' trx', counterparty: cp, paidByMe: out, feeTrx: fee, note: memo ? 'invoice ' + i : undefined, fees: { bandwidth: activate ? 0 : burn, activation: activate ? 1.1 : 0, memo: memo ? 1 : 0 } }))
   } else if (r < 0.6) {
     const out = rnd() < 0.5
     const v = Math.round(rnd() * 120 * 100) / 100
     const txid = Math.floor(rnd() * 1e16).toString(16).padStart(16, '0').repeat(4)
-    const t20 = base({ txid, time, type: 'USDT transfer', kind: 'token', direction: out ? 'out' : 'in', sign: out ? -1 : 1, value: v, unit: 'usdt', amount: v + ' usdt', counterparty: cp, paidByMe: out, isUsdt: true, tokenContract: USDT, bandwidth: 0 })
+    const t20 = base({ txid, time, type: 'USDT transfer', kind: 'trc20', direction: out ? 'out' : 'in', sign: out ? -1 : 1, value: v, unit: 'usdt', amount: v + ' usdt', counterparty: cp, paidByMe: out, isUsdt: true, tokenContract: USDT, bandwidth: 0 })
     mockTrc20.push(t20)
     if (out) {
       const fail = rnd() < 0.06
       const ef = Math.round((fail ? 6.2 : rnd() < 0.5 ? 1.3 + rnd() * 2 : 0) * 1e4) / 1e4
-      mockAll.push(base({ txid, time, type: 'TriggerSmart', kind: 'contract', counterparty: USDT, amount: 'token transfer', feeTrx: ef, energyFeeTrx: ef, energy: fail ? 62000 : 13045 + Math.floor(rnd() * 20000), bandwidth: 345, result: fail ? 'OUT_OF_ENERGY' : 'SUCCESS' }))
+      mockAll.push(base({ txid, time, type: 'TriggerSmart', kind: 'contract-call', counterparty: USDT, amount: 'token transfer', feeTrx: ef, fees: { energy: ef }, energy: fail ? 62000 : 13045 + Math.floor(rnd() * 20000), bandwidth: 345, result: fail ? 'OUT_OF_ENERGY' : 'SUCCESS' }))
       if (fail) mockTrc20.pop()
     }
   } else if (r < 0.7) {
-    mockAll.push(base({ time, type: 'FreezeBalanceV2', kind: 'stake', value: 100 * Math.ceil(rnd() * 10), unit: 'trx', amount: 'stake' }))
+    mockAll.push(base({ time, type: rnd() < 0.7 ? 'FreezeBalanceV2' : 'UnfreezeBalanceV2', kind: 'stake', value: 100 * Math.ceil(rnd() * 10), unit: 'trx', amount: 'stake' }))
   } else if (r < 0.78) {
     mockAll.push(base({ time, type: 'VoteWitness', kind: 'vote', value: 1500, unit: 'votes', amount: '1500 votes' }))
   } else if (r < 0.84) {
     const v = 100 * Math.ceil(rnd() * 5)
-    mockAll.push(base({ time, type: 'DelegateResource', kind: 'delegate', value: v, unit: 'trx', amount: v + ' trx energy', counterparty: cp }))
+    const un = rnd() < 0.35
+    mockAll.push(base({ time, type: un ? 'UnDelegateResource' : 'DelegateResource', kind: un ? 'undelegate' : 'delegate', value: v, unit: 'trx', amount: v + ' trx energy', counterparty: cp }))
   } else if (r < 0.88) {
     mockAll.push(base({ time, type: 'WithdrawBalance', kind: 'claim', amount: 'claim' }))
   } else if (r < 0.9) {
-    mockAll.push(base({ time, type: 'AccountPermissionUpdate', kind: 'permission', feeTrx: 100, otherFeeTrx: 100, bandwidth: 366 }))
+    mockAll.push(base({ time, type: 'AccountPermissionUpdate', kind: 'permission', feeTrx: 101, signature: 2, fees: { permission: 100, multisig: 1 }, bandwidth: 366 }))
   } else if (r < 0.93) {
-    mockTrc20.push(base({ time, type: 'USDT transfer', kind: 'token', direction: 'in', sign: 1, value: 0.001, unit: 'usdt', amount: '0.001 usdt', counterparty: 'TPhishy1111111111111111111111111bb', paidByMe: false, isUsdt: false, tokenContract: 'TFakeUSDTcontract111111111111111aa', bandwidth: 0 }))
+    mockTrc20.push(base({ time, type: 'USDT transfer', kind: 'trc20', direction: 'in', sign: 1, value: 0.001, unit: 'usdt', amount: '0.001 usdt', counterparty: 'TPhishy1111111111111111111111111bb', paidByMe: false, isUsdt: false, tokenContract: 'TFakeUSDTcontract111111111111111aa', bandwidth: 0 }))
   } else {
     mockAll.push(base({ time, type: 'VoteWitness', kind: 'vote', direction: 'in', counterparty: cp, paidByMe: false, value: 20, unit: 'votes', amount: '20 votes' }))
   }
 }
+for (const x of mockAll) if (x.type === 'UnfreezeBalanceV2') x.kind = 'unstake'
 mockAll.sort((a, b) => b.time - a.time)
 mockTrc20.sort((a, b) => b.time - a.time)
 // daily TRX balance for ~1000 days ending at the current mock balance
@@ -238,8 +244,13 @@ export function installMockApi() {
     rewardInfo: () => wait({ claimable: 12.483921, lastClaim: Date.now() - 3 * 86400e3, nextClaim: Date.now() - 2 * 86400e3 }),
     claimRewards: plainTx,
     txReceipt: () => wait({ found: true, result: 'SUCCESS', feeTrx: 0.345, energy: 13045, bandwidth: 345, block: 70485000 }),
-    history: (_a: string, kind: string) =>
-      wait({ items: kind === 'trc20' ? mockTrc20 : mockAll, next: undefined, source: 'api.shasta.trongrid.io', fallback: false }, 300),
+    history: (_a: string, kind: string, _f?: string, opts?: { usdtOnly?: boolean; since?: number }) =>
+      wait({
+        items: (kind === 'trc20' ? mockTrc20 : mockAll).filter(
+          (x) => (!opts?.usdtOnly || x.isUsdt) && (!opts?.since || x.time >= opts.since)
+        ),
+        next: undefined, source: 'api.shasta.trongrid.io', fallback: false
+      }, 300),
     balanceHistory: (_a: string, days: number) =>
       wait({ points: mockDaily.slice(-Math.min(days, mockDaily.length)), source: 'shastapi.tronscan.org' }, 400),
     inspectTx: (json: string) => { try { return wait(summarize(json)) } catch (e) { return Promise.reject(e) } },

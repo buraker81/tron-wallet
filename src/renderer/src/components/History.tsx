@@ -2,9 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Balances, BalancePoint, HistoryItem, HistoryKind, NetworkId, PublicKey } from '../../../shared/types'
 import { fmt, short } from '../ui'
 import { Bars, LineChart } from './history/charts'
+import { FEE_PARTS, typeLabel, typeOrder, type FeeSplit } from '../../../shared/txtypes'
 import {
   EMPTY_FILTERS,
-  KIND_ORDER,
   RANGES,
   applyFilters,
   dayList,
@@ -14,6 +14,7 @@ import {
   mergeFeeds,
   totals,
   usdtSeries,
+  dayKey,
   type Filters,
   type RangeId
 } from './history/data'
@@ -21,22 +22,6 @@ import {
 const ARROW: Record<HistoryItem['direction'], string> = { in: '←', out: '→', self: '↺', other: '·' }
 const when = (ms: number) =>
   new Date(ms).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })
-// shorter labels for the long contract type names
-const TYPE: Record<string, string> = {
-  TriggerSmart: 'contract call',
-  CreateSmart: 'deploy contract',
-  FreezeBalanceV2: 'stake',
-  UnfreezeBalanceV2: 'unstake',
-  WithdrawExpireUnfreeze: 'withdraw unstaked',
-  CancelAllUnfreezeV2: 'cancel unstakes',
-  DelegateResource: 'delegate',
-  UnDelegateResource: 'reclaim',
-  VoteWitness: 'vote',
-  WithdrawBalance: 'claim rewards',
-  AccountPermissionUpdate: 'permission update',
-  Transfer: 'transfer',
-  TransferAsset: 'trc10 transfer'
-}
 
 /** Stop loading after this many items per feed (keeps huge accounts usable). */
 const CAP = 5000
@@ -52,6 +37,50 @@ interface Loaded {
 
 // survives tab switches; cleared by "reload"
 const cache = new Map<string, Loaded>()
+
+const USDT_CAP = 20000
+const usdtCache = new Map<string, { items: HistoryItem[]; complete: boolean; oldest: number }>()
+
+/** Official USDT transfers since the range start (contract + time filtered on TronGrid), for the USDT balance chart. */
+function useUsdtTransfers(address: string, network: NetworkId, days: number, enabled: boolean, nonce: number) {
+  const key = `${network}:${address}:${days}:${nonce}`
+  const [state, setState] = useState<{ items: HistoryItem[]; complete: boolean; oldest: number; done: boolean; error?: string; count: number }>(
+    () => ({ ...(usdtCache.get(key) ?? { items: [], complete: false, oldest: Date.now() }), done: usdtCache.has(key), count: 0 })
+  )
+  useEffect(() => {
+    if (!enabled) return
+    const hit = usdtCache.get(key)
+    if (hit) {
+      setState({ ...hit, done: true, count: hit.items.length })
+      return
+    }
+    let alive = true
+    setState({ items: [], complete: false, oldest: Date.now(), done: false, count: 0 })
+    ;(async () => {
+      const since = Date.now() - days * 86_400_000
+      const items: HistoryItem[] = []
+      let next: string | undefined
+      try {
+        do {
+          const page = await window.api.history(address, 'trc20', next, { usdtOnly: true, since })
+          if (!alive) return
+          items.push(...page.items.filter((x) => x.isUsdt))
+          next = page.items.length ? page.next : undefined
+          setState((s) => ({ ...s, count: items.length }))
+        } while (next && items.length < USDT_CAP)
+        const res = { items, complete: !next, oldest: items.length ? Math.min(...items.map((x) => x.time)) : since }
+        usdtCache.set(key, res)
+        if (alive) setState({ ...res, done: true, count: items.length })
+      } catch (e: any) {
+        if (alive) setState({ items, complete: false, oldest: Date.now(), done: true, error: e.message, count: items.length })
+      }
+    })()
+    return () => {
+      alive = false
+    }
+  }, [key, enabled])
+  return state
+}
 
 /** Loads both TronGrid feeds page by page (200/page) up to CAP, reporting progress; cached per network + address. */
 function useHistory(address: string, network: NetworkId) {
@@ -104,6 +133,7 @@ function useHistory(address: string, network: NetworkId) {
 
   return {
     ...state,
+    nonce,
     progress,
     stop: () => (stop.current = true),
     reload: () => {
@@ -157,13 +187,15 @@ export function History({ from, keys, network, balances }: {
   const dayKeys = useMemo(() => dayList(days), [days])
   const buckets = useMemo(() => feeBuckets(filtered, dayKeys), [filtered, dayKeys])
 
-  // balance series: TRX from Tronscan, USDT rebuilt from transfers (only meaningful once everything is loaded)
-  const usdtPoints = useMemo(
-    () => (h.done && balances?.usdt != null ? usdtSeries(h.items, balances.usdt, dayKeys) : []),
-    [h.done, h.items, balances?.usdt, dayKeys]
-  )
-  const oldestLoaded = h.items.length ? h.items[h.items.length - 1].time : 0
-  const usdtApprox = h.capped && oldestLoaded > Date.now() - days * 86_400_000
+  // balance series: TRX from Tronscan; USDT rebuilt from the official USDT transfers of the range, loaded on their
+  // own (contract-filtered) so spam tokens in the TRC20 feed can't push them out of the 5,000 item cap
+  const usdt = useUsdtTransfers(from.address, network, days, series === 'usdt', h.nonce)
+  const usdtPoints = useMemo(() => {
+    if (!usdt.done || balances?.usdt == null) return []
+    const all = usdtSeries(usdt.items, balances.usdt, dayKeys)
+    // without every transfer back to the range start, only days after the oldest loaded transfer are exact
+    return usdt.complete ? all : all.filter((p) => p.day >= dayKey(usdt.oldest))
+  }, [usdt.done, usdt.items, usdt.complete, usdt.oldest, balances?.usdt, dayKeys])
   const points = series === 'trx' ? (trxDaily?.points.map((p) => ({ day: p.day, value: p.trx })) ?? []) : usdtPoints
   const first = points[0]?.value ?? 0
   const last = points[points.length - 1]?.value ?? 0
@@ -197,7 +229,8 @@ export function History({ from, keys, network, balances }: {
           </span>
         ) : (
           <span className="muted small">
-            {fmt(h.items.length, 0)} txs loaded{h.capped && ' (not complete)'}
+            {fmt(h.items.length, 0)} txs loaded
+            {h.capped && h.items.length > 0 && ` (not complete: back to ${dayKey(h.items[h.items.length - 1].time)})`}
             {h.source && ` · ${h.source.host}`}
             {h.source?.fallback && ' (active node has no history API)'}
           </span>
@@ -235,7 +268,10 @@ export function History({ from, keys, network, balances }: {
         </div>
         {series === 'trx' && !trxDaily && <div className="chart-empty muted">loading daily balance from Tronscan…</div>}
         {series === 'trx' && trxDaily?.error && <div className="chart-empty error">{trxDaily.error}</div>}
-        {series === 'usdt' && !h.done && <div className="chart-empty muted">waiting for the full transfer list…</div>}
+        {series === 'usdt' && !usdt.done && (
+          <div className="chart-empty muted">loading usdt transfers… {fmt(usdt.count, 0)}</div>
+        )}
+        {series === 'usdt' && usdt.error && <div className="chart-empty error">{usdt.error}</div>}
         {series === 'usdt' && h.done && balances?.usdt == null && (
           <div className="chart-empty muted">no USDT balance for this network</div>
         )}
@@ -243,22 +279,17 @@ export function History({ from, keys, network, balances }: {
         <div className="muted small">
           {series === 'trx'
             ? `daily balance (end of day, UTC) from ${trxDaily?.source || 'Tronscan'}`
-            : `rebuilt from USDT transfers back from today's balance${usdtApprox ? ` · approximate before ${new Date(oldestLoaded).toISOString().slice(0, 10)} (history not complete)` : ''}`}
+            : usdt.complete
+              ? `rebuilt from ${fmt(usdt.items.length, 0)} usdt transfers back from today's balance (exact for the whole range)`
+              : usdt.done
+                ? `usdt balance only shown from ${dayKey(usdt.oldest)}: this address has more than ${fmt(USDT_CAP, 0)} usdt transfers in the range, older days would be a guess`
+                : ''}
         </div>
       </section>
 
       {/* totals */}
+      <FeesPanel t={t} />
       <section className="totals">
-        <div className="panel">
-          <div className="panel-title">fees burned</div>
-          <div className="big">{fmt(t.fee, 4)} trx</div>
-          <dl className="kv single compact">
-            <Kv k="bandwidth" v={`${fmt(t.netFee, 4)} trx`} />
-            <Kv k="energy" v={`${fmt(t.energyFee, 4)} trx`} />
-            <Kv k="other" v={`${fmt(t.otherFee, 4)} trx`} hint="memo, multi-signature, activation, permission update" />
-            <Kv k="paid txs" v={`${fmt(t.paid, 0)} of ${fmt(t.txs, 0)}`} />
-          </dl>
-        </div>
         <div className="panel">
           <div className="panel-title">resources used</div>
           <div className="big">{fmt(t.energy, 0)} energy</div>
@@ -298,9 +329,11 @@ export function History({ from, keys, network, balances }: {
                   {b.start}
                 </div>
                 <b>{fmt(b.fee, 4)} trx</b>
-                <div className="muted">
-                  bw {fmt(b.netFee, 4)} · energy {fmt(b.energyFee, 4)} · other {fmt(b.otherFee, 4)}
-                </div>
+                {feeLines(b.fees).map(([label, v]) => (
+                  <div key={label} className="muted">
+                    {label} {fmt(v, 4)}
+                  </div>
+                ))}
                 <div className="muted">{b.txs} txs</div>
               </>
             )
@@ -317,9 +350,11 @@ export function History({ from, keys, network, balances }: {
           >
             all <span className="count">{ranged.length}</span>
           </button>
-          {KIND_ORDER.filter((k) => counts.get(k)).map((k) => (
+          {[...counts.keys()]
+            .sort((a, b) => typeOrder(a) - typeOrder(b) || a.localeCompare(b))
+            .map((k) => (
             <button key={k} className={`chip ${filters.kinds.has(k) ? 'on' : ''}`} onClick={() => toggleKind(k)}>
-              {k} <span className="count">{counts.get(k)}</span>
+              {typeLabel(k)} <span className="count">{counts.get(k)}</span>
             </button>
           ))}
         </div>
@@ -378,7 +413,7 @@ export function History({ from, keys, network, balances }: {
                 <tr key={x.txid + x.type}>
                   <td className="nowrap muted">{when(x.time)}</td>
                   <td>
-                    <span title={x.type}>{TYPE[x.type] ?? x.type}</span>
+                    <span title={x.type}>{x.kind === 'trc20' ? x.type : typeLabel(x.kind)}</span>
                     {x.unit && x.kind === 'token' && !x.isUsdt && x.tokenContract && (
                       <span className="warn small" title={x.tokenContract}>
                         {' '}
@@ -398,13 +433,13 @@ export function History({ from, keys, network, balances }: {
                   </td>
                   <td className={`nowrap ${x.sign > 0 ? 'ok' : ''}`}>
                     {x.value !== undefined ? `${x.sign > 0 ? '+' : x.sign < 0 ? '−' : ''}${fmt(x.value, 6)} ${x.unit}` : (x.amount ?? '')}
-                    {x.kind === 'delegate' || x.kind === 'reclaim' ? <span className="muted"> {x.amount?.split(' ').pop()}</span> : null}
+                    {x.kind === 'delegate' || x.kind === 'undelegate' ? <span className="muted"> {x.amount?.split(' ').pop()}</span> : null}
                   </td>
                   <td
                     className="nowrap muted"
                     title={
                       x.paidByMe
-                        ? `bandwidth ${fmt(x.netFeeTrx, 6)} · energy ${fmt(x.energyFeeTrx, 6)} · other ${fmt(x.otherFeeTrx, 6)} trx`
+                        ? feeLines(x.fees).map(([l, v]) => `${l} ${fmt(v, 6)} trx`).join(' · ') || 'no TRX burned'
                         : 'paid by the sender'
                     }
                   >
@@ -440,6 +475,61 @@ function Kv({ k, v, hint }: { k: string; v: string; hint?: string }) {
     <div className="kv-row" title={hint}>
       <dt>{k}</dt>
       <dd>{v}</dd>
+    </div>
+  )
+}
+
+/** Non-zero fee parts as [label, trx]. */
+function feeLines(f: FeeSplit): [string, number][] {
+  return FEE_PARTS.filter((p) => f[p.key] > 0).map((p) => [p.label, f[p.key]])
+}
+
+/** Fees burned by cause: resource shortage (bandwidth, energy) vs fixed fees (account creation, memo, …). */
+function FeesPanel({ t }: { t: ReturnType<typeof totals> }) {
+  const row = (key: keyof FeeSplit, indent = false) => {
+    const part = FEE_PARTS.find((p) => p.key === key)!
+    const v = t.fees[key]
+    const share = t.fee > 0 ? v / t.fee : 0
+    return (
+      <div key={key} className={`fee-row ${v > 0 ? '' : 'zero'} ${indent ? 'indent' : ''}`} title={part.hint}>
+        <span className="fee-label">{part.label}</span>
+        <span className="fee-value">{fmt(v, 4)} trx</span>
+        <span className="fee-count muted">
+          {t.feeTxs[key] ? `${fmt(t.feeTxs[key], 0)} tx${t.feeTxs[key] === 1 ? '' : 's'}` : ''}
+          {key === 'activation' && t.accountsCreated > 0 && ` · ${fmt(t.accountsCreated, 0)} accounts created`}
+        </span>
+        <span className="fee-share">
+          <span className="share-bar">
+            <span style={{ width: `${Math.max(v > 0 ? 2 : 0, share * 100)}%` }} />
+          </span>
+          <span className="muted">{v > 0 ? `${fmt(share * 100, 1)}%` : ''}</span>
+        </span>
+      </div>
+    )
+  }
+  const fixed: (keyof FeeSplit)[] = ['activation', 'memo', 'multisig', 'permission', 'other']
+  const shortage = t.fees.bandwidth + t.fees.energy
+  return (
+    <div className="panel fees-panel">
+      <div className="panel-head">
+        <span className="panel-title">fees burned</span>
+        <span className="big">{fmt(t.fee, 4)} trx</span>
+        <span className="spacer" />
+        <span className="muted small">
+          {fmt(t.paid, 0)} of {fmt(t.txs, 0)} txs sent by this address
+        </span>
+      </div>
+      <div className="fee-group">
+        <span className="fee-group-title">resource shortage</span>
+        <span className="muted small">{fmt(shortage, 4)} trx · not enough staked / free resources</span>
+      </div>
+      {row('bandwidth', true)}
+      {row('energy', true)}
+      <div className="fee-group">
+        <span className="fee-group-title">fixed fees</span>
+        <span className="muted small">{fmt(t.fee - shortage, 4)} trx</span>
+      </div>
+      {fixed.filter((k) => k !== 'other' || t.fees.other > 0).map((k) => row(k, true))}
     </div>
   )
 }
