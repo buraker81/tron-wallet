@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Balances, NetworkId, PublicKey, TxResult } from '../../shared/types'
+import type { Balances, NetworkId, NodeState, PublicKey, TxResult } from '../../shared/types'
 import { fmt, short } from './ui'
 import { SendTrx, SendUsdt } from './components/Send'
 import { Stake } from './components/Stake'
 import { Vote } from './components/Vote'
 import { Permissions } from './components/Permissions'
 import { BalancesPanel } from './components/BalancesPanel'
+import { NETWORK_LABELS, NodesModal } from './components/NodesModal'
 
 const TABS = ['Send TRX', 'Send USDT', 'Stake', 'Vote', 'Permissions'] as const
 type Tab = (typeof TABS)[number]
@@ -33,6 +34,9 @@ export default function App() {
   const [busy, setBusy] = useState(false)
   const [confirm, setConfirm] = useState<{ label: string; resolve: (ok: boolean) => void }>()
   const [copied, setCopied] = useState<string>()
+  const [nodes, setNodes] = useState<NodeState>()
+  const [nodesError, setNodesError] = useState<string>()
+  const [showNodes, setShowNodes] = useState(false)
   const networkRef = useRef(network)
   networkRef.current = network
 
@@ -63,6 +67,7 @@ export default function App() {
 
   useEffect(() => {
     window.api.getNetwork().then(setNetwork)
+    window.api.listNodes().then(setNodes).catch((e) => setNodesError(e.message))
     loadKeys().then(refresh)
   }, [loadKeys, refresh])
 
@@ -72,6 +77,17 @@ export default function App() {
     setBalances({})
     refresh(keys)
   }
+
+  const onNodes = (s: NodeState) => {
+    const changed = nodes?.selected[network] !== s.selected[network]
+    setNodes(s)
+    if (changed) {
+      setBalances({})
+      refresh(keys)
+    }
+  }
+
+  const nodeOptions = nodes?.nodes.filter((n) => n.network === network) ?? []
 
   const askConfirm = (label: string) =>
     new Promise<boolean>((resolve) => setConfirm({ label, resolve }))
@@ -110,12 +126,30 @@ export default function App() {
         {network === 'mainnet' && <span className="badge-mainnet">MAINNET</span>}
         <div className="spacer" />
         <div className="net-toggle">
-          {(['shasta', 'mainnet'] as NetworkId[]).map((n) => (
+          {(Object.keys(NETWORK_LABELS) as NetworkId[]).map((n) => (
             <button key={n} className={n === network ? 'active' : ''} onClick={() => switchNetwork(n)}>
-              {n === 'shasta' ? 'Shasta' : 'Mainnet'}
+              {NETWORK_LABELS[n]}
             </button>
           ))}
         </div>
+        {nodesError && <span className="error small">{nodesError}</span>}
+        {nodes && (
+          <select
+            title="Active node"
+            value={nodes.selected[network]}
+            onChange={async (e) => onNodes(await window.api.selectNode(network, e.target.value))}
+          >
+            {nodeOptions.map((n) => (
+              <option key={n.id} value={n.id}>
+                {n.name}
+                {n.apiKey ? ' 🔑' : ''}
+              </option>
+            ))}
+          </select>
+        )}
+        <button onClick={() => setShowNodes(true)} disabled={!nodes}>
+          Nodes
+        </button>
         <button onClick={() => refresh()} disabled={loading}>
           {loading ? 'Loading…' : 'Refresh'}
         </button>
@@ -206,6 +240,10 @@ export default function App() {
           </div>
         ))}
       </footer>
+
+      {showNodes && nodes && (
+        <NodesModal state={nodes} network={network} onState={onNodes} onClose={() => setShowNodes(false)} />
+      )}
 
       {confirm && (
         <div className="modal-backdrop">

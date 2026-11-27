@@ -1,6 +1,7 @@
 import { TronWeb } from 'tronweb'
 import { getKey } from './key'
 import { NETWORKS } from './networks'
+import { activeNode, nodeHeaders } from './nodes'
 import type {
   AccountPermissions,
   Balances,
@@ -24,10 +25,8 @@ export function setNetwork(n: NetworkId): NetworkId {
 }
 
 function tw(privateKey?: string): TronWeb {
-  const net = NETWORKS[current]
-  const headers: Record<string, string> = {}
-  if (process.env.TRONGRID_API_KEY) headers['TRON-PRO-API-KEY'] = process.env.TRONGRID_API_KEY
-  return new TronWeb({ fullHost: net.fullHost, headers, privateKey })
+  const node = activeNode(current)
+  return new TronWeb({ fullHost: node.fullHost, headers: nodeHeaders(node), privateKey })
 }
 
 const toBase58 = (addr: string): string =>

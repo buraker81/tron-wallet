@@ -1,4 +1,4 @@
-export type NetworkId = 'shasta' | 'mainnet'
+export type NetworkId = 'shasta' | 'nile' | 'mainnet'
 export type Resource = 'ENERGY' | 'BANDWIDTH'
 
 export interface PublicKey {
@@ -55,8 +55,37 @@ export interface TxOptions {
   permissionId?: number
 }
 
+export interface NodeConfig {
+  id: string
+  name: string
+  network: NetworkId
+  fullHost: string
+  apiKey?: string
+  /** Header used to send apiKey. Defaults to TRON-PRO-API-KEY (TronGrid). */
+  apiKeyHeader?: string
+  builtin?: boolean
+}
+
+export interface NodeState {
+  nodes: NodeConfig[]
+  selected: Record<NetworkId, string>
+  path: string
+}
+
+export interface NodeTestResult {
+  ok: boolean
+  latencyMs: number
+  block?: number
+  error?: string
+}
+
 export interface Api {
   listKeys(): Promise<{ keys: PublicKey[]; error?: string; path: string }>
+  listNodes(): Promise<NodeState>
+  saveNode(node: NodeConfig): Promise<NodeState>
+  deleteNode(id: string): Promise<NodeState>
+  selectNode(network: NetworkId, id: string): Promise<NodeState>
+  testNode(node: NodeConfig): Promise<NodeTestResult>
   getNetwork(): Promise<NetworkId>
   setNetwork(n: NetworkId): Promise<NetworkId>
   balances(address: string): Promise<Balances>

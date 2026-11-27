@@ -1,7 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
 const channels = [
-  'listKeys', 'getNetwork', 'setNetwork', 'balances', 'listSRs', 'getPermissions',
+  'listKeys', 'listNodes', 'saveNode', 'deleteNode', 'selectNode', 'testNode',
+  'getNetwork', 'setNetwork', 'balances', 'listSRs', 'getPermissions',
   'sendTrx', 'sendUsdt', 'stake', 'unstake', 'withdrawUnfrozen', 'vote',
   'updatePermissions', 'explorerUrl'
 ]

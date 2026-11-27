@@ -1,6 +1,6 @@
 # Tron Wallet (MVP)
 
-A minimal desktop wallet for experimenting with TRON transaction types on **Shasta testnet** (with a Mainnet toggle).
+A minimal desktop wallet for experimenting with TRON transaction types on **Shasta** / **Nile** testnets (with a Mainnet toggle).
 
 Features: balances & resources, Send TRX, Send USDT (TRC20), Stake 2.0 (stake / unstake / withdraw), Vote for SRs, Account Permissions (owner/active, multisig). Every form has an optional `Permission ID` field for multisig tests.
 
@@ -17,13 +17,29 @@ Private keys are only read in the Electron main process and never sent to the UI
 
 Get Shasta test TRX from the faucet: https://shasta.tronex.io
 
+## Nodes
+
+Use the node dropdown in the header to pick the active node per network, and the **Nodes** button to manage them:
+add your own (e.g. a local java-tron at `http://127.0.0.1:8090`), edit, delete, test (latest block + latency), and
+see/edit API keys. TronGrid nodes for each network are built in.
+
+Nodes are stored in `nodes.json` next to `keys.json` (git-ignored because it holds API keys).
+
+## Permissions: operations bitmask
+
+Active permissions have an `operations` field: a 32-byte hex mask of allowed contract types. In the Permissions tab you
+build it with checkboxes (grouped, with presets like *Transfers only* or *Stake & vote*). You can also paste raw hex,
+and the checkboxes update. Bit `N % 8` of byte `N / 8` enables contract type id `N`.
+
 ## Config (env vars)
 
 | Var | Purpose |
 |---|---|
 | `KEYS_FILE` | Path to a keys file other than `./keys.json` |
-| `TRONGRID_API_KEY` | TronGrid API key (recommended to avoid rate limits) |
+| `NODES_FILE` | Path to a nodes file other than `nodes.json` next to the keys file |
+| `TRONGRID_API_KEY` | Fallback API key for the built-in TronGrid nodes (when none is saved in the app) |
 | `SHASTA_USDT` | Shasta USDT contract (default `TG3XXyExBkPp9nzdajDZsozEu4BkaSJozs`) |
+| `NILE_USDT` | Nile USDT contract (default `TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf`) |
 
 ## Notes
 
@@ -35,5 +51,7 @@ Get Shasta test TRX from the faucet: https://shasta.tronex.io
 
 - `src/main/key.ts`: `Key` interface, `getKey(id)`, `listKeys()`
 - `src/main/tron.ts`: all TronWeb reads/writes
-- `src/main/networks.ts`: Shasta / Mainnet endpoints + USDT contracts
+- `src/main/networks.ts`: Shasta / Nile / Mainnet defaults + USDT contracts
+- `src/main/nodes.ts`: node list, selection, API keys, connection test
+- `src/shared/operations.ts`: operations bitmask encode/decode + contract type list
 - `src/renderer/src/`: React UI

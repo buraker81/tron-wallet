@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { join } from 'node:path'
 import { listKeys, keysPath } from './key'
 import * as tron from './tron'
+import * as nodes from './nodes'
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -41,6 +42,11 @@ app.whenReady().then(() => {
       return { keys: [], error: e.message, path: keysPath() }
     }
   })
+  handle('listNodes', nodes.listNodes)
+  handle('saveNode', nodes.saveNode)
+  handle('deleteNode', nodes.deleteNode)
+  handle('selectNode', nodes.selectNode)
+  handle('testNode', nodes.testNode)
   handle('getNetwork', tron.getNetwork)
   handle('setNetwork', tron.setNetwork)
   handle('balances', tron.balances)
