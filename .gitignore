@@ -1,0 +1,7 @@
+node_modules
+out
+dist
+keys.json
+.env
+.DS_Store
+*.tsbuildinfo

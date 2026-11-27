@@ -1,0 +1,4 @@
+[
+  { "id": 1, "address": "TYourAddress1...", "privateKey": "hex-private-key-1" },
+  { "id": 2, "address": "TYourAddress2...", "privateKey": "hex-private-key-2" }
+]
