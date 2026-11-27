@@ -1,9 +1,33 @@
 export type NetworkId = 'shasta' | 'nile' | 'mainnet'
 export type Resource = 'ENERGY' | 'BANDWIDTH'
 
+export type KeySource = 'file' | 'hd' | 'random' | 'imported' | 'watch'
+
 export interface PublicKey {
   id: number
   address: string
+  label?: string
+  source: KeySource
+  /** false for watch-only addresses */
+  canSign: boolean
+  hd?: { mnemonicId: string; index: number; path: string }
+}
+
+export interface VaultStatus {
+  exists: boolean
+  unlocked: boolean
+  path: string
+  autoLockMinutes: number
+}
+
+export interface MnemonicInfo {
+  id: string
+  name: string
+  words: number
+  hasPassphrase: boolean
+  nextIndex: number
+  derived: number
+  createdAt: number
 }
 
 export interface Balances {
@@ -81,6 +105,24 @@ export interface NodeTestResult {
 
 export interface Api {
   listKeys(): Promise<{ keys: PublicKey[]; error?: string; path: string }>
+  vaultStatus(): Promise<VaultStatus>
+  vaultCreate(password: string): Promise<VaultStatus>
+  vaultUnlock(password: string): Promise<VaultStatus>
+  vaultLock(): Promise<VaultStatus>
+  vaultChangePassword(oldPw: string, newPw: string): Promise<VaultStatus>
+  listMnemonics(): Promise<MnemonicInfo[]>
+  createMnemonic(name: string, words: 12 | 24, passphrase?: string): Promise<{ id: string; phrase: string }>
+  importMnemonic(name: string, phrase: string, passphrase?: string): Promise<MnemonicInfo[]>
+  deriveNext(mnemonicId: string, count: number, labelPrefix?: string): Promise<PublicKey[]>
+  createRandomKey(label: string): Promise<PublicKey>
+  importPrivateKey(label: string, privateKey: string): Promise<PublicKey>
+  addWatchOnly(label: string, address: string): Promise<PublicKey>
+  importKeysFile(): Promise<{ added: number; skipped: number }>
+  renameKey(id: number, label: string): Promise<void>
+  deleteKey(id: number): Promise<void>
+  revealPrivateKey(id: number, password: string): Promise<string>
+  revealMnemonic(id: string, password: string): Promise<{ phrase: string; passphrase?: string }>
+  onVaultChanged(cb: () => void): () => void
   listNodes(): Promise<NodeState>
   saveNode(node: NodeConfig): Promise<NodeState>
   deleteNode(id: string): Promise<NodeState>

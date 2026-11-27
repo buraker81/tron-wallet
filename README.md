@@ -15,6 +15,21 @@ npm run dev
 `keys.json` (git-ignored) is an array of `{ "id": number, "address": "T...", "privateKey": "hex" }`.
 Private keys are only read in the Electron main process and never sent to the UI.
 
+## Vault & address generation
+
+Besides `keys.json` you can keep keys in an encrypted **vault** (`vault.json` next to `keys.json`, git-ignored).
+Both sources show up in the address list (tagged `file`, `hd`, `random`, `imported`, `watch`), and `getKey(id)`
+looks in `keys.json` first, then in the vault.
+
+- Create / unlock / lock from the top of the sidebar. Auto-locks after 15 minutes of inactivity.
+- Encryption: scrypt (N=2^17, r=8, p=1) + AES-256-GCM. While unlocked only the derived key is kept in memory
+  (main process). Private keys never reach the UI unless you use *show private key* (asks for the password again).
+- **HD seeds**: generate a 12/24-word BIP39 seed or import one (optional BIP39 passphrase), then *derive next*
+  addresses at `m/44'/195'/0'/0/i` (the standard TRON path used by TronLink / Ledger).
+- **Single keys**: random key, import a private key, or add a watch-only address.
+- **Settings**: import all `keys.json` entries into the vault, change password.
+- New addresses are not on chain until they receive TRX: select one and use *fund* to send 1 TRX from a funded key.
+
 Get Shasta test TRX from the faucet: https://shasta.tronex.io
 
 ## UI
@@ -43,6 +58,7 @@ and the checkboxes update. Bit `N % 8` of byte `N / 8` enables contract type id 
 | Var | Purpose |
 |---|---|
 | `KEYS_FILE` | Path to a keys file other than `./keys.json` |
+| `VAULT_FILE` | Path to a vault file other than `vault.json` next to the keys file |
 | `NODES_FILE` | Path to a nodes file other than `nodes.json` next to the keys file |
 | `TRONGRID_API_KEY` | Fallback API key for the built-in TronGrid nodes (when none is saved in the app) |
 | `SHASTA_USDT` | Shasta USDT contract (default `TG3XXyExBkPp9nzdajDZsozEu4BkaSJozs`) |
@@ -59,6 +75,7 @@ and the checkboxes update. Bit `N % 8` of byte `N / 8` enables contract type id 
 - `src/main/key.ts`: `Key` interface, `getKey(id)`, `listKeys()`
 - `src/main/tron.ts`: all TronWeb reads/writes
 - `src/main/networks.ts`: Shasta / Nile / Mainnet defaults + USDT contracts
+- `src/main/vault.ts`: encrypted vault, HD derivation, key import/export
 - `src/main/nodes.ts`: node list, selection, API keys, connection test
 - `src/shared/operations.ts`: operations bitmask encode/decode + contract type list
 - `src/renderer/src/`: React UI

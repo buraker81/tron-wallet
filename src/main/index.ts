@@ -1,6 +1,8 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { join } from 'node:path'
-import { listKeys, keysPath } from './key'
+import { existsSync } from 'node:fs'
+import { listKeys, keysPath, loadFileKeys } from './key'
+import * as vault from './vault'
 import * as tron from './tron'
 import * as nodes from './nodes'
 
@@ -35,13 +37,38 @@ function handle(channel: string, fn: (...args: any[]) => any): void {
 }
 
 app.whenReady().then(() => {
+  vault.initVault(
+    () => vault.vaultPath(keysPath()),
+    () => BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('vault-changed'))
+  )
+
   handle('listKeys', () => {
+    const path = keysPath()
     try {
-      return { keys: listKeys(), path: keysPath() }
+      const keys = listKeys()
+      const fileMissing = !existsSync(path) && !vault.status().exists
+      return { keys, path, error: fileMissing ? `No keys.json at ${path} and no vault yet` : undefined }
     } catch (e: any) {
-      return { keys: [], error: e.message, path: keysPath() }
+      return { keys: [], error: e.message, path }
     }
   })
+  handle('vaultStatus', vault.status)
+  handle('vaultCreate', vault.create)
+  handle('vaultUnlock', vault.unlock)
+  handle('vaultLock', vault.lock)
+  handle('vaultChangePassword', vault.changePassword)
+  handle('listMnemonics', vault.listMnemonics)
+  handle('createMnemonic', vault.createMnemonic)
+  handle('importMnemonic', vault.importMnemonic)
+  handle('deriveNext', vault.deriveNext)
+  handle('createRandomKey', vault.createRandomKey)
+  handle('importPrivateKey', vault.importPrivateKey)
+  handle('addWatchOnly', vault.addWatchOnly)
+  handle('importKeysFile', () => vault.importFromFile(loadFileKeys()))
+  handle('renameKey', vault.renameKey)
+  handle('deleteKey', vault.deleteKey)
+  handle('revealPrivateKey', vault.revealPrivateKey)
+  handle('revealMnemonic', vault.revealMnemonic)
   handle('listNodes', nodes.listNodes)
   handle('saveNode', nodes.saveNode)
   handle('deleteNode', nodes.deleteNode)

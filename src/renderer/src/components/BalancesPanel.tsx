@@ -14,8 +14,11 @@ export function BalancesPanel({ id, address, balances: b }: { id: number; addres
         <dl className="kv">
           <Row k="trx" v={fmt(b.trx)} strong />
           <Row k="usdt" v={b.usdt === null ? 'n/a' : fmt(b.usdt)} strong />
-          <Row k="energy" v={`${fmt(b.energy.limit - b.energy.used, 0)} / ${fmt(b.energy.limit, 0)}`} />
-          <Row k="bandwidth" v={`${fmt(b.bandwidth.limit - b.bandwidth.used, 0)} / ${fmt(b.bandwidth.limit, 0)}`} />
+          <Row k="energy" v={`${fmt(Math.max(0, b.energy.limit - b.energy.used), 0)} / ${fmt(b.energy.limit, 0)}`} />
+          <Row
+            k="bandwidth"
+            v={`${fmt(Math.max(0, b.bandwidth.limit - b.bandwidth.used), 0)} / ${fmt(b.bandwidth.limit, 0)}`}
+          />
           <Row k="staked" v={b.frozen.length ? b.frozen.map((f) => `${fmt(f.amount)} ${f.type.toLowerCase()}`).join(', ') : '0'} />
           <Row k="tron power" v={`${fmt(b.tronPower, 0)} (${fmt(used, 0)} voted)`} />
           {b.unfreezing.length > 0 && (

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Balances, NetworkId, NodeState, PublicKey, TxResult } from '../../shared/types'
+import type { Balances, NetworkId, NodeState, PublicKey, TxResult, VaultStatus } from '../../shared/types'
 import { fmt, short } from './ui'
 import { SendTrx, SendUsdt } from './components/Send'
 import { Stake } from './components/Stake'
@@ -7,6 +7,8 @@ import { Vote } from './components/Vote'
 import { Permissions } from './components/Permissions'
 import { BalancesPanel } from './components/BalancesPanel'
 import { NETWORK_LABELS, NodesModal } from './components/NodesModal'
+import { CreateVaultModal, UnlockModal, VaultBar, VaultModal } from './components/Vault'
+import { AccountActions } from './components/AccountActions'
 
 const TABS = ['send-trx', 'send-usdt', 'stake', 'vote', 'permissions'] as const
 type Tab = (typeof TABS)[number]
@@ -55,9 +57,32 @@ export default function App() {
     const res = await window.api.listKeys()
     setKeys(res.keys)
     setKeysError(res.error)
-    setSelectedId((cur) => cur ?? res.keys[0]?.id)
+    setSelectedId((cur) => (res.keys.some((k) => k.id === cur) ? cur : res.keys[0]?.id))
     return res.keys
   }, [])
+
+  const [vault, setVault] = useState<VaultStatus>()
+  const [vaultModal, setVaultModal] = useState<'create' | 'unlock' | 'manage'>()
+  const balancesRef = useRef(balances)
+  balancesRef.current = balances
+
+  /** Reload the key list and fetch balances only for addresses we have not loaded yet. */
+  const syncKeys = useCallback(async () => {
+    const ks = await loadKeys()
+    const missing = ks.filter((k) => !balancesRef.current[k.address])
+    const entries = await Promise.all(
+      missing.map((k) => window.api.balances(k.address).then((b) => [k.address, b] as const).catch(() => null))
+    )
+    setBalances((cur) => ({ ...cur, ...Object.fromEntries(entries.filter(Boolean) as [string, Balances][]) }))
+  }, [loadKeys])
+
+  useEffect(() => {
+    window.api.vaultStatus().then(setVault)
+    return window.api.onVaultChanged(() => {
+      window.api.vaultStatus().then(setVault)
+      syncKeys()
+    })
+  }, [syncKeys])
 
   const refresh = useCallback(async (list?: PublicKey[]) => {
     const ks = list ?? (await loadKeys())
@@ -177,6 +202,7 @@ export default function App() {
 
       <div className="body">
         <aside>
+          <VaultBar status={vault} onOpen={setVaultModal} />
           <div className="section-title">
             addresses <span className="muted">{keys.length}</span>
           </div>
@@ -193,6 +219,7 @@ export default function App() {
                   <div className="addr-line">
                     <span className="addr-id">{String(k.id).padStart(2, '0')}</span>
                     <span>{short(k.address)}</span>
+                    <span className={`src src-${k.source}`}>{k.source === 'file' ? 'file' : k.source}</span>
                     <button
                       className="copy"
                       onClick={(e) => {
@@ -203,6 +230,7 @@ export default function App() {
                       {copied === k.address ? 'copied' : 'copy'}
                     </button>
                   </div>
+                  {k.label && <div className="addr-label">{k.label}</div>}
                   <div className="addr-bal">
                     {b ? (
                       <>
@@ -223,6 +251,14 @@ export default function App() {
           {selected ? (
             <>
               <BalancesPanel address={selected.address} id={selected.id} balances={bal} />
+              <AccountActions
+                k={selected}
+                keys={keys}
+                balances={bal}
+                allBalances={balances}
+                runTx={runTx}
+                busy={busy}
+              />
               <nav className="tabs">
                 {TABS.map((t) => (
                   <button key={t} className={t === tab ? 'on' : ''} onClick={() => setTab(t)}>
@@ -275,6 +311,18 @@ export default function App() {
           ))}
         </div>
       </footer>
+
+      {vaultModal === 'create' && vault && (
+        <CreateVaultModal path={vault.path} onClose={() => setVaultModal(undefined)} />
+      )}
+      {vaultModal === 'unlock' && <UnlockModal onClose={() => setVaultModal(undefined)} />}
+      {vaultModal === 'manage' && vault?.unlocked && (
+        <VaultModal
+          status={vault}
+          onClose={() => setVaultModal(undefined)}
+          onCreated={(ks) => ks[0] && setSelectedId(ks[ks.length - 1].id)}
+        />
+      )}
 
       {showNodes && nodes && (
         <NodesModal state={nodes} network={network} onState={onNodes} onClose={() => setShowNodes(false)} />
