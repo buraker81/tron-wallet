@@ -17,6 +17,13 @@ Private keys are only read in the Electron main process and never sent to the UI
 
 Get Shasta test TRX from the faucet: https://shasta.tronex.io
 
+## UI
+
+Monospace (IBM Plex Mono), flat, light and dark themes (toggle in the header; defaults to the OS setting).
+
+Preview the UI in a normal browser with fake data: run `npm run dev` and open `http://localhost:5173`
+(when the Electron preload is missing, a dev-only mock API is used).
+
 ## Nodes
 
 Use the node dropdown in the header to pick the active node per network, and the **Nodes** button to manage them:

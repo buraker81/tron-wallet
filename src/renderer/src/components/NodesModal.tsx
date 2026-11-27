@@ -53,7 +53,7 @@ export function NodesModal({
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal wide" onClick={(e) => e.stopPropagation()}>
         <div className="row">
-          <h3 style={{ color: 'inherit' }}>Nodes</h3>
+          <h3>nodes</h3>
           <div className="spacer" />
           <button onClick={() => setEditing(blank(network))}>+ Add node</button>
           <button onClick={onClose}>Close</button>

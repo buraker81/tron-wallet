@@ -8,7 +8,7 @@ import { Permissions } from './components/Permissions'
 import { BalancesPanel } from './components/BalancesPanel'
 import { NETWORK_LABELS, NodesModal } from './components/NodesModal'
 
-const TABS = ['Send TRX', 'Send USDT', 'Stake', 'Vote', 'Permissions'] as const
+const TABS = ['send-trx', 'send-usdt', 'stake', 'vote', 'permissions'] as const
 type Tab = (typeof TABS)[number]
 
 interface LogEntry {
@@ -29,7 +29,7 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<number>()
   const [balances, setBalances] = useState<Record<string, Balances>>({})
   const [loading, setLoading] = useState(false)
-  const [tab, setTab] = useState<Tab>('Send TRX')
+  const [tab, setTab] = useState<Tab>('send-trx')
   const [log, setLog] = useState<LogEntry[]>([])
   const [busy, setBusy] = useState(false)
   const [confirm, setConfirm] = useState<{ label: string; resolve: (ok: boolean) => void }>()
@@ -37,6 +37,15 @@ export default function App() {
   const [nodes, setNodes] = useState<NodeState>()
   const [nodesError, setNodesError] = useState<string>()
   const [showNodes, setShowNodes] = useState(false)
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    const saved = localStorage.getItem('theme')
+    if (saved === 'light' || saved === 'dark') return saved
+    return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+  })
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    localStorage.setItem('theme', theme)
+  }, [theme])
   const networkRef = useRef(network)
   networkRef.current = network
 
@@ -119,74 +128,95 @@ export default function App() {
   const bal = selected ? balances[selected.address] : undefined
   const common = { keys, runTx, busy }
 
+  const activeNode = nodes?.nodes.find((n) => n.id === nodes.selected[network])
+
   return (
     <div className={`app ${network}`}>
+      {network === 'mainnet' && <div className="mainnet-bar">mainnet: transactions are real</div>}
       <header>
-        <h1>Tron Wallet</h1>
-        {network === 'mainnet' && <span className="badge-mainnet">MAINNET</span>}
-        <div className="spacer" />
-        <div className="net-toggle">
+        <span className="brand">tron-wallet</span>
+        <nav className="seg">
           {(Object.keys(NETWORK_LABELS) as NetworkId[]).map((n) => (
-            <button key={n} className={n === network ? 'active' : ''} onClick={() => switchNetwork(n)}>
-              {NETWORK_LABELS[n]}
+            <button key={n} className={n === network ? 'on' : ''} onClick={() => switchNetwork(n)}>
+              {n}
             </button>
           ))}
-        </div>
-        {nodesError && <span className="error small">{nodesError}</span>}
+        </nav>
+        <div className="spacer" />
+        {nodesError && <span className="error">{nodesError}</span>}
         {nodes && (
-          <select
-            title="Active node"
-            value={nodes.selected[network]}
-            onChange={async (e) => onNodes(await window.api.selectNode(network, e.target.value))}
-          >
-            {nodeOptions.map((n) => (
-              <option key={n.id} value={n.id}>
-                {n.name}
-                {n.apiKey ? ' 🔑' : ''}
-              </option>
-            ))}
-          </select>
+          <label className="inline">
+            <span className="muted">node</span>
+            <select
+              value={nodes.selected[network]}
+              onChange={async (e) => onNodes(await window.api.selectNode(network, e.target.value))}
+            >
+              {nodeOptions.map((n) => (
+                <option key={n.id} value={n.id}>
+                  {n.name}
+                  {n.apiKey ? ' (key)' : ''}
+                </option>
+              ))}
+            </select>
+          </label>
         )}
-        <button onClick={() => setShowNodes(true)} disabled={!nodes}>
-          Nodes
+        <button className="ghost" onClick={() => setShowNodes(true)} disabled={!nodes}>
+          nodes
         </button>
-        <button onClick={() => refresh()} disabled={loading}>
-          {loading ? 'Loading…' : 'Refresh'}
+        <button className="ghost" onClick={() => refresh()} disabled={loading}>
+          {loading ? 'loading…' : 'refresh'}
+        </button>
+        <button
+          className="ghost theme-toggle"
+          title="Toggle light / dark theme"
+          onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
+        >
+          {theme === 'dark' ? 'light' : 'dark'}
         </button>
       </header>
 
       <div className="body">
         <aside>
-          <div className="aside-title">Addresses ({keys.length})</div>
-          {keysError && <div className="error small">{keysError}</div>}
-          {keys.map((k) => (
-            <div
-              key={k.id}
-              className={`addr-item ${k.id === selectedId ? 'selected' : ''}`}
-              onClick={() => setSelectedId(k.id)}
-            >
-              <div className="addr-row">
-                <span className="addr-id">#{k.id}</span>
-                <span className="mono">{short(k.address)}</span>
-                <button
-                  className="link"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    copy(k.address)
-                  }}
+          <div className="section-title">
+            addresses <span className="muted">{keys.length}</span>
+          </div>
+          {keysError && <div className="error pad">{keysError}</div>}
+          <ul className="addr-list">
+            {keys.map((k) => {
+              const b = balances[k.address]
+              return (
+                <li
+                  key={k.id}
+                  className={k.id === selectedId ? 'sel' : ''}
+                  onClick={() => setSelectedId(k.id)}
                 >
-                  {copied === k.address ? 'Copied' : 'Copy'}
-                </button>
-              </div>
-              <div className="addr-bal">
-                {balances[k.address]
-                  ? `${fmt(balances[k.address].trx, 2)} TRX${
-                      balances[k.address].usdt ? ` · ${fmt(balances[k.address].usdt!, 2)} USDT` : ''
-                    }`
-                  : '—'}
-              </div>
-            </div>
-          ))}
+                  <div className="addr-line">
+                    <span className="addr-id">{String(k.id).padStart(2, '0')}</span>
+                    <span>{short(k.address)}</span>
+                    <button
+                      className="copy"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        copy(k.address)
+                      }}
+                    >
+                      {copied === k.address ? 'copied' : 'copy'}
+                    </button>
+                  </div>
+                  <div className="addr-bal">
+                    {b ? (
+                      <>
+                        {fmt(b.trx, 2)} trx{b.usdt ? <> · {fmt(b.usdt, 2)} usdt</> : null}
+                        {!b.activated && <> · inactive</>}
+                      </>
+                    ) : (
+                      '…'
+                    )}
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
         </aside>
 
         <main>
@@ -195,50 +225,55 @@ export default function App() {
               <BalancesPanel address={selected.address} id={selected.id} balances={bal} />
               <nav className="tabs">
                 {TABS.map((t) => (
-                  <button key={t} className={t === tab ? 'active' : ''} onClick={() => setTab(t)}>
+                  <button key={t} className={t === tab ? 'on' : ''} onClick={() => setTab(t)}>
                     {t}
                   </button>
                 ))}
               </nav>
               <section className="tab-body">
-                {tab === 'Send TRX' && <SendTrx from={selected} {...common} />}
-                {tab === 'Send USDT' && <SendUsdt from={selected} {...common} />}
-                {tab === 'Stake' && <Stake from={selected} balances={bal} {...common} />}
-                {tab === 'Vote' && <Vote from={selected} balances={bal} network={network} {...common} />}
-                {tab === 'Permissions' && <Permissions from={selected} network={network} {...common} />}
+                {tab === 'send-trx' && <SendTrx from={selected} {...common} />}
+                {tab === 'send-usdt' && <SendUsdt from={selected} {...common} />}
+                {tab === 'stake' && <Stake from={selected} balances={bal} {...common} />}
+                {tab === 'vote' && <Vote from={selected} balances={bal} network={network} {...common} />}
+                {tab === 'permissions' && <Permissions from={selected} network={network} {...common} />}
               </section>
             </>
           ) : (
             <div className="empty">
-              {keysError ? 'Add a keys.json file to the project root, then hit Refresh.' : 'Select an address.'}
+              {keysError ? 'Add a keys.json file to the project root, then refresh.' : 'Select an address.'}
             </div>
           )}
         </main>
       </div>
 
       <footer>
-        <div className="aside-title">Transaction log</div>
-        {log.length === 0 && <div className="muted small">No transactions yet.</div>}
-        {log.map((e, i) => (
-          <div key={i} className="log-row">
-            <span className="muted">{e.time}</span>
-            <span className={`net-tag ${e.network}`}>{e.network}</span>
-            <span>{e.label}</span>
-            {e.error && <span className="error">{e.error}</span>}
-            {e.result && (
-              <>
-                <span className={e.result.ok ? 'ok' : 'error'}>
-                  {e.result.ok ? 'Broadcast OK' : e.result.message}
-                </span>
-                {e.url && (
-                  <a href={e.url} target="_blank" rel="noreferrer" className="mono">
-                    {short(e.result.txid)}
-                  </a>
-                )}
-              </>
-            )}
-          </div>
-        ))}
+        <div className="section-title">
+          log
+          <span className="muted">
+            {activeNode ? `${network} · ${activeNode.fullHost}` : network}
+          </span>
+        </div>
+        <div className="log">
+          {log.length === 0 && <div className="muted">$ no transactions yet</div>}
+          {log.map((e, i) => (
+            <div key={i} className="log-row">
+              <span className="muted">{e.time}</span>
+              <span className={`net ${e.network}`}>{e.network}</span>
+              <span className="log-label">{e.label}</span>
+              {e.error && <span className="error">err {e.error}</span>}
+              {e.result && (
+                <>
+                  <span className={e.result.ok ? 'ok' : 'error'}>{e.result.ok ? 'ok' : `err ${e.result.message}`}</span>
+                  {e.url && (
+                    <a href={e.url} target="_blank" rel="noreferrer">
+                      {short(e.result.txid)}
+                    </a>
+                  )}
+                </>
+              )}
+            </div>
+          ))}
+        </div>
       </footer>
 
       {showNodes && nodes && (
@@ -247,28 +282,31 @@ export default function App() {
 
       {confirm && (
         <div className="modal-backdrop">
-          <div className="modal">
-            <h3>You are on MAINNET</h3>
-            <p>This will broadcast a real transaction:</p>
-            <p className="mono">{confirm.label}</p>
-            <div className="row">
-              <button
-                onClick={() => {
-                  confirm.resolve(false)
-                  setConfirm(undefined)
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                className="danger"
-                onClick={() => {
-                  confirm.resolve(true)
-                  setConfirm(undefined)
-                }}
-              >
-                Confirm & Send
-              </button>
+          <div className="modal confirm">
+            <div className="modal-head danger-head">confirm mainnet transaction</div>
+            <div className="modal-body">
+              <p>This broadcasts a real transaction on mainnet:</p>
+              <pre>{confirm.label}</pre>
+              <div className="actions">
+                <button
+                  className="ghost"
+                  onClick={() => {
+                    confirm.resolve(false)
+                    setConfirm(undefined)
+                  }}
+                >
+                  cancel
+                </button>
+                <button
+                  className="danger"
+                  onClick={() => {
+                    confirm.resolve(true)
+                    setConfirm(undefined)
+                  }}
+                >
+                  confirm and send
+                </button>
+              </div>
             </div>
           </div>
         </div>
