@@ -82,6 +82,23 @@ function useHistoryCache(address: string, network: NetworkId) {
     }
   }, [address, network])
 
+  // live mode saw a tx of this address: it is stored once confirmed (~1 min), so sync a bit after that.
+  // Several txs in a row share one sync.
+  const syncRef = useRef(sync)
+  syncRef.current = sync
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const off = window.api.onLiveActivity((hits) => {
+      if (!hits.some((x) => x.address === address && x.network === network)) return
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => syncRef.current(), 75_000)
+    })
+    return () => {
+      off()
+      if (timer) clearTimeout(timer)
+    }
+  }, [address, network])
+
   return {
     data,
     syncing,

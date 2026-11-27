@@ -7,7 +7,7 @@ const channels = [
   'revealPrivateKey', 'revealMnemonic',
   'listNodes', 'saveNode', 'deleteNode', 'selectNode', 'testNode',
   'getNetwork', 'setNetwork', 'balances', 'listSRs', 'getPermissions',
-  'sendTrx', 'sendUsdt', 'stake', 'unstake', 'withdrawUnfrozen', 'vote', 'cancelUnstakes', 'delegationInfo', 'getMemoFee', 'estimateTx', 'rewardInfo', 'claimRewards', 'historyData', 'historySync', 'historyStop', 'historyClear', 'balanceHistory', 'txReceipt', 'inspectTx', 'signTx', 'broadcastTx', 'delegate', 'undelegate',
+  'sendTrx', 'sendUsdt', 'stake', 'unstake', 'withdrawUnfrozen', 'vote', 'cancelUnstakes', 'delegationInfo', 'getMemoFee', 'estimateTx', 'rewardInfo', 'claimRewards', 'liveSet', 'historyData', 'historySync', 'historyStop', 'historyClear', 'balanceHistory', 'txReceipt', 'inspectTx', 'signTx', 'broadcastTx', 'delegate', 'undelegate',
   'updatePermissions', 'explorerUrl'
 ]
 
@@ -31,5 +31,14 @@ api.onHistoryProgress = (cb: (p: unknown) => void) => {
   ipcRenderer.on('history-progress', listener)
   return () => ipcRenderer.removeListener('history-progress', listener)
 }
+
+const subscribe = (channel: string) => (cb: (p: unknown) => void) => {
+  const listener = (_e: unknown, p: unknown) => cb(p)
+  ipcRenderer.on(channel, listener)
+  return () => ipcRenderer.removeListener(channel, listener)
+}
+api.onLiveStatus = subscribe('live-status')
+api.onLiveActivity = subscribe('live-activity')
+api.onLiveGap = subscribe('live-gap')
 
 contextBridge.exposeInMainWorld('api', api)

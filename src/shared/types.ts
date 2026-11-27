@@ -233,6 +233,34 @@ export interface HistoryData {
   path: string
 }
 
+/** A tx in a new block that touches one of the watched addresses (live mode). */
+export interface LiveActivity {
+  network: NetworkId
+  block: number
+  time: number
+  txid: string
+  /** contract type without "Contract" */
+  type: string
+  /** the watched address involved */
+  address: string
+  direction: 'in' | 'out'
+  counterparty?: string
+  /** TRX transfers and USDT transfers */
+  amount?: number
+  unit?: string
+  result?: string
+}
+
+export interface LiveStatus {
+  enabled: boolean
+  /** last tick succeeded */
+  ok: boolean
+  network?: NetworkId
+  block?: number
+  blockTime?: number
+  error?: string
+}
+
 export interface HistoryProgress {
   address: string
   network: NetworkId
@@ -339,6 +367,10 @@ export interface Api {
   historyStop(address: string): Promise<void>
   historyClear(address: string): Promise<void>
   onHistoryProgress(cb: (p: HistoryProgress) => void): () => void
+  liveSet(on: boolean, addresses: string[]): Promise<LiveStatus>
+  onLiveStatus(cb: (s: LiveStatus) => void): () => void
+  onLiveActivity(cb: (hits: LiveActivity[]) => void): () => void
+  onLiveGap(cb: (g: { network: NetworkId; from: number; to: number }) => void): () => void
   balanceHistory(address: string, days: number): Promise<BalanceHistory>
   txReceipt(txid: string): Promise<TxReceipt>
   inspectTx(json: string): Promise<TxSummary>

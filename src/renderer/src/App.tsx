@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { AccountPermissions, Balances, NetworkId, NodeConfig, NodeState, PublicKey, TxReceipt, TxResult, VaultStatus } from '../../shared/types'
+import type { AccountPermissions, Balances, LiveActivity, LiveStatus, NetworkId, NodeConfig, NodeState, PublicKey, TxReceipt, TxResult, VaultStatus } from '../../shared/types'
 import { TxContext, fmt, short } from './ui'
 import { SendTrx, SendUsdt } from './components/Send'
 import { Stake } from './components/Stake'
@@ -25,6 +25,8 @@ interface LogEntry {
   url?: string
   /** filled in once the tx is found in a block */
   receipt?: TxReceipt
+  /** seen in a new block by live mode */
+  live?: LiveActivity
 }
 
 /** Runs a tx action with mainnet confirmation and logging. Resolves to the result, or undefined if cancelled/failed. */
@@ -41,6 +43,7 @@ export default function App() {
   const [network, setNetwork] = useState<NetworkId>('shasta')
   const [keys, setKeys] = useState<PublicKey[]>([])
   const [keysError, setKeysError] = useState<string>()
+  const keysRef = useRef<PublicKey[]>([])
   const [selectedId, setSelectedId] = useState<number>()
   const [balances, setBalances] = useState<Record<string, Balances>>({})
   const [loading, setLoading] = useState(false)
@@ -65,6 +68,11 @@ export default function App() {
     document.documentElement.dataset.theme = theme
     localStorage.setItem('theme', theme)
   }, [theme])
+  // ---- live mode: follow new blocks, react to txs touching our addresses ----
+  const [liveOn, setLiveOn] = useState(() => localStorage.getItem('live') === 'on')
+  const [liveStatus, setLiveStatus] = useState<LiveStatus>()
+  const [flash, setFlash] = useState<Set<string>>(new Set())
+  useEffect(() => localStorage.setItem('live', liveOn ? 'on' : 'off'), [liveOn])
   const networkRef = useRef(network)
   networkRef.current = network
 
@@ -73,6 +81,7 @@ export default function App() {
   const loadKeys = useCallback(async () => {
     const res = await window.api.listKeys()
     setKeys(res.keys)
+    keysRef.current = res.keys
     setKeysError(res.error)
     setSelectedId((cur) => (res.keys.some((k) => k.id === cur) ? cur : res.keys[0]?.id))
     return res.keys
@@ -118,6 +127,54 @@ export default function App() {
     )
     setLoading(false)
   }, [loadKeys])
+
+  /** Refresh one address's balance (live hits) without touching the others. */
+  const refreshOne = useCallback((address: string) => {
+    window.api
+      .balances(address)
+      .then((b) => setBalances((cur) => ({ ...cur, [address]: b })))
+      .catch(() => {})
+  }, [])
+
+  const addressKey = keys.map((k) => k.address).join(',')
+  useEffect(() => {
+    window.api.liveSet(liveOn, keys.map((k) => k.address)).then(setLiveStatus)
+  }, [liveOn, addressKey])
+
+  useEffect(() => {
+    const offStatus = window.api.onLiveStatus(setLiveStatus)
+    const offGap = window.api.onLiveGap(() => refresh(keysRef.current))
+    const offHits = window.api.onLiveActivity(async (hits) => {
+      const mine = hits.filter((h) => h.network === networkRef.current)
+      if (!mine.length) return
+      const time = new Date().toLocaleTimeString('en-GB')
+      const urls = await Promise.all(mine.map((h) => window.api.explorerUrl(h.txid)))
+      setLog((l) => {
+        // our own sends are already in the log (from runTx); don't repeat them
+        const known = new Set(l.map((e) => e.result?.txid).filter(Boolean))
+        const fresh = mine
+          .map((h, i) => ({ time, network: h.network, label: '', live: h, url: urls[i] }))
+          .filter((e) => !known.has(e.live.txid))
+        return [...fresh, ...l].slice(0, 300)
+      })
+      const touched = [...new Set(mine.map((h) => h.address))]
+      touched.forEach((a) => refreshOne(a))
+      setFlash(new Set(touched))
+      setTimeout(() => setFlash(new Set()), 2500)
+    })
+    return () => {
+      offStatus()
+      offGap()
+      offHits()
+    }
+  }, [refresh, refreshOne])
+
+  // things a block scan can't see (transfers inside other contracts): full refresh every 2 min while live
+  useEffect(() => {
+    if (!liveOn) return
+    const t = setInterval(() => refresh(keysRef.current), 120_000)
+    return () => clearInterval(t)
+  }, [liveOn, refresh])
 
   useEffect(() => {
     window.api.getNetwork().then(setNetwork)
@@ -263,6 +320,20 @@ export default function App() {
             </select>
           </label>
         )}
+        <button
+          className={`ghost live-toggle ${liveOn ? 'on' : ''} ${liveOn && liveStatus && !liveStatus.ok ? 'bad' : ''}`}
+          title={
+            liveOn
+              ? liveStatus?.ok === false
+                ? `live: last block request failed (${liveStatus.error}), retrying`
+                : 'live: following new blocks (~3 s) for your addresses. Click to turn off.'
+              : 'Follow new blocks and update balances, log and history as your addresses are used'
+          }
+          onClick={() => setLiveOn((v) => !v)}
+        >
+          <span key={liveStatus?.block} className="live-dot" />
+          {liveOn ? (liveStatus?.block ? `#${liveStatus.block.toLocaleString('en-US')}` : 'live…') : 'live'}
+        </button>
         <button className="ghost" onClick={() => setShowNodes(true)} disabled={!nodes}>
           nodes
         </button>
@@ -291,7 +362,7 @@ export default function App() {
               return (
                 <li
                   key={k.id}
-                  className={k.id === selectedId ? 'sel' : ''}
+                  className={`${k.id === selectedId ? 'sel' : ''} ${flash.has(k.address) ? 'flash' : ''}`}
                   onClick={() => setSelectedId(k.id)}
                 >
                   <div className="addr-line">
@@ -402,7 +473,8 @@ export default function App() {
             <div key={i} className="log-row">
               <span className="muted">{e.time}</span>
               <span className={`net ${e.network}`}>{e.network}</span>
-              <span className="log-label">{e.label}</span>
+              {e.live && <LiveLine h={e.live} url={e.url} keys={keys} />}
+              {!e.live && <span className="log-label">{e.label}</span>}
               {e.error && <span className="error">err {e.error}</span>}
               {e.result?.pending && (
                 <>
@@ -494,5 +566,40 @@ export default function App() {
       )}
     </div>
     </TxContext.Provider>
+  )
+}
+
+/** One log line for a tx seen by live mode. */
+function LiveLine({ h, url, keys }: { h: LiveActivity; url?: string; keys: PublicKey[] }) {
+  const k = keys.find((x) => x.address === h.address)
+  const other = h.counterparty ? keys.find((x) => x.address === h.counterparty) : undefined
+  const verb = h.type === 'Transfer' || h.unit === 'usdt' ? (h.direction === 'in' ? 'received' : 'sent') : h.type.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase()
+  return (
+    <>
+      <span className="live-tag">live</span>
+      <span className="log-label">
+        {k ? `#${k.id}` : short(h.address)} {h.direction === 'in' ? '←' : '→'} {verb}
+        {h.amount !== undefined && (
+          <span className={h.direction === 'in' ? 'ok' : ''}>
+            {' '}
+            {h.direction === 'in' ? '+' : '−'}
+            {fmt(h.amount, 6)} {h.unit}
+          </span>
+        )}
+        {h.counterparty && (
+          <span className="muted">
+            {' '}
+            {h.direction === 'in' ? 'from' : 'to'} {other ? `#${other.id}` : short(h.counterparty)}
+          </span>
+        )}
+      </span>
+      <span className="muted">block {h.block.toLocaleString('en-US')}</span>
+      {h.result && h.result !== 'SUCCESS' && <span className="error">{h.result.toLowerCase()}</span>}
+      {url && (
+        <a href={url} target="_blank" rel="noreferrer">
+          {short(h.txid)}
+        </a>
+      )}
+    </>
   )
 }

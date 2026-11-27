@@ -154,6 +154,26 @@ const mockDaily: { day: string; trx: number }[] = []
 }
 void ME
 
+let liveTimer: any
+let liveOn = false
+let liveBlock = 70490000
+const liveListeners = { status: new Set<(s: any) => void>(), activity: new Set<(h: any[]) => void>() }
+function liveTick() {
+  if (!liveOn) return
+  liveBlock++
+  liveListeners.status.forEach((cb) => cb({ enabled: true, ok: true, block: liveBlock, network }))
+  if (liveBlock % 3 === 0) {
+    const inbound = liveBlock % 2 === 0
+    const usdt = liveBlock % 9 === 0
+    const hit = {
+      network, block: liveBlock, time: Date.now(), txid: Math.random().toString(16).slice(2).padEnd(64, 'c'),
+      type: usdt ? 'TriggerSmart' : 'Transfer', address: fileKeys[inbound ? 1 : 0].address, direction: inbound ? 'in' : 'out',
+      counterparty: inbound ? fileKeys[0].address : 'TGNzrfuE14gMxBNwNVdzwFaMLHbm16rrKd', amount: usdt ? 25 : 12.5, unit: usdt ? 'usdt' : 'trx', result: 'SUCCESS'
+    }
+    liveListeners.activity.forEach((cb) => cb([hit]))
+  }
+}
+
 export function installMockApi() {
   ;(window as any).api = {
     listKeys: () => wait({ keys: keys(), path: '/Users/you/projects/tron_wallet/keys.json' }),
@@ -259,6 +279,16 @@ export function installMockApi() {
     historyStop: () => wait(undefined),
     historyClear: () => wait(undefined),
     onHistoryProgress: () => () => {},
+    // live mode mock: a block every 3 s, sometimes a tx for one of the keys
+    liveSet: (on: boolean) => {
+      clearInterval(liveTimer)
+      liveOn = on
+      if (on) liveTimer = setInterval(liveTick, 3000)
+      return wait({ enabled: on, ok: true, block: liveBlock })
+    },
+    onLiveStatus: (cb: any) => (liveListeners.status.add(cb), () => liveListeners.status.delete(cb)),
+    onLiveActivity: (cb: any) => (liveListeners.activity.add(cb), () => liveListeners.activity.delete(cb)),
+    onLiveGap: () => () => {},
     balanceHistory: (_a: string, days: number) =>
       wait({ points: mockDaily.slice(-Math.min(days, mockDaily.length)), source: 'shastapi.tronscan.org' }, 400),
     inspectTx: (json: string) => { try { return wait(summarize(json)) } catch (e) { return Promise.reject(e) } },

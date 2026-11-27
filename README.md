@@ -81,6 +81,22 @@ Preview the UI in a normal browser with fake data: run `npm run dev` and open `h
   - if the active node is not TronGrid, the built-in TronGrid host of the network is used
 - **Voting rewards**: the vote tab shows unclaimed rewards and a *claim* button (WithdrawBalance, once per 24 h).
 
+## Live mode
+
+The **live** button in the header follows new blocks (~every 3 s; the dot pulses on each block and the block number
+is shown). Each tick fetches the latest block, which contains all its txs, and scans it locally for your addresses
+(keys.json + unlocked vault), so watching many addresses costs one request per block. Missed blocks are fetched in
+one range call; long gaps (sleep, offline) trigger a full refresh.
+
+When one of your addresses appears in a block:
+- the log gets a `live` line (`#2 ← received +12.5 trx from …`, USDT amounts decoded from the call data, block, tx link)
+- that address's balance is refreshed and its row flashes
+- the history cache syncs ~75 s later, once the tx is confirmed
+
+Detected: TRX / TRC10 transfers, TRC20 `transfer` / `transferFrom`, stake, delegate, vote, permission… (owner,
+receiver and vote addresses). Not detected: transfers made inside other contracts, so balances are also refreshed
+every 2 minutes while live. Works on public TronGrid without a key (one small request per block). The setting is kept.
+
 ## Notes, signing and multisig
 
 Every transaction form has:
@@ -161,6 +177,7 @@ and the checkboxes update. Bit `N % 8` of byte `N / 8` enables contract type id 
 - `src/main/networks.ts`: Shasta / Nile / Mainnet defaults + USDT contracts
 - `src/main/estimate.ts`: fee / bandwidth / energy estimate
 - `src/main/history.ts`: TronGrid v1 history pages, item processing (types, fee causes), tx receipts
+- `src/main/live.ts`: live mode (block follower and scanner)
 - `src/main/historyCache.ts`: SQLite history cache and sync
 - `src/main/multisig.ts`: signing pipeline (note, expiration, signer checks, weight, broadcast) and sign-tx tools
 - `src/main/client.ts`: TronWeb client for the active node / network

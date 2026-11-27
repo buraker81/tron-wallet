@@ -9,6 +9,7 @@ import * as multisig from './multisig'
 import { estimateTx } from './estimate'
 import * as hist from './history'
 import * as historyCache from './historyCache'
+import * as live from './live'
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -95,6 +96,7 @@ app.whenReady().then(() => {
   handle('estimateTx', estimateTx)
   handle('rewardInfo', tron.rewardInfo)
   handle('claimRewards', tron.claimRewards)
+  handle('liveSet', live.setLive)
   handle('historyData', historyCache.historyData)
   handle('historySync', historyCache.syncHistory)
   handle('historyStop', historyCache.stopHistorySync)
