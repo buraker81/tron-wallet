@@ -21,6 +21,12 @@ export function BalancesPanel({ id, address, balances: b }: { id: number; addres
           />
           <Row k="staked" v={b.frozen.length ? b.frozen.map((f) => `${fmt(f.amount)} ${f.type.toLowerCase()}`).join(', ') : '0'} />
           <Row k="tron power" v={`${fmt(b.tronPower, 0)} (${fmt(used, 0)} voted)`} />
+          {(b.delegatedOut.energy > 0 || b.delegatedOut.bandwidth > 0) && (
+            <Row k="delegated out" v={delegText(b.delegatedOut)} />
+          )}
+          {(b.delegatedIn.energy > 0 || b.delegatedIn.bandwidth > 0) && (
+            <Row k="received" v={delegText(b.delegatedIn)} />
+          )}
           {b.unfreezing.length > 0 && (
             <Row
               k="unstaking"
@@ -39,6 +45,11 @@ export function BalancesPanel({ id, address, balances: b }: { id: number; addres
     </div>
   )
 }
+
+const delegText = (d: { energy: number; bandwidth: number }) =>
+  [d.energy > 0 && `${fmt(d.energy)} trx energy`, d.bandwidth > 0 && `${fmt(d.bandwidth)} trx bandwidth`]
+    .filter(Boolean)
+    .join(', ')
 
 function Row({ k, v, strong }: { k: string; v: string; strong?: boolean }) {
   return (

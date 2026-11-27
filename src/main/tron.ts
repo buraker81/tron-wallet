@@ -5,6 +5,8 @@ import { activeNode, nodeHeaders } from './nodes'
 import type {
   AccountPermissions,
   Balances,
+  Delegation,
+  DelegationInfo,
   NetworkId,
   Permission,
   Resource,
@@ -110,6 +112,14 @@ export async function balances(address: string): Promise<Balances> {
       expireAt: u.unfreeze_expire_time ?? 0
     })),
     tronPower: res?.tronPowerLimit ?? 0,
+    delegatedOut: {
+      energy: (account?.account_resource?.delegated_frozenV2_balance_for_energy ?? 0) / SUN,
+      bandwidth: (account?.delegated_frozenV2_balance_for_bandwidth ?? 0) / SUN
+    },
+    delegatedIn: {
+      energy: (account?.account_resource?.acquired_delegated_frozenV2_balance_for_energy ?? 0) / SUN,
+      bandwidth: (account?.acquired_delegated_frozenV2_balance_for_bandwidth ?? 0) / SUN
+    },
     votes: (account?.votes ?? []).map((v: any) => ({
       address: toBase58(v.vote_address),
       count: v.vote_count
@@ -137,6 +147,40 @@ function normPerm(p: any): Permission | null {
     threshold: p.threshold ?? 1,
     operations: p.operations,
     keys: (p.keys ?? []).map((k: any) => ({ address: toBase58(k.address), weight: k.weight }))
+  }
+}
+
+/** Split one getDelegatedResourceV2 record into per-resource rows. */
+function delegationRows(records: any[], other: (r: any) => string): Delegation[] {
+  const rows: Delegation[] = []
+  for (const r of records ?? []) {
+    if (r.frozen_balance_for_energy) {
+      rows.push({ address: other(r), resource: 'ENERGY', amount: r.frozen_balance_for_energy / SUN, lockedUntil: r.expire_time_for_energy ?? 0 })
+    }
+    if (r.frozen_balance_for_bandwidth) {
+      rows.push({ address: other(r), resource: 'BANDWIDTH', amount: r.frozen_balance_for_bandwidth / SUN, lockedUntil: r.expire_time_for_bandwidth ?? 0 })
+    }
+  }
+  return rows
+}
+
+export async function delegationInfo(address: string): Promise<DelegationInfo> {
+  const t = tw()
+  const [index, maxE, maxB, params]: any[] = await Promise.all([
+    t.trx.getDelegatedResourceAccountIndexV2(address),
+    t.trx.getCanDelegatedMaxSize(address, 'ENERGY').catch(() => ({})),
+    t.trx.getCanDelegatedMaxSize(address, 'BANDWIDTH').catch(() => ({})),
+    t.trx.getChainParameters().catch(() => [])
+  ])
+  const [outs, ins] = await Promise.all([
+    Promise.all((index?.toAccounts ?? []).map((to: string) => t.trx.getDelegatedResourceV2(address, to))),
+    Promise.all((index?.fromAccounts ?? []).map((from: string) => t.trx.getDelegatedResourceV2(from, address)))
+  ])
+  return {
+    out: outs.flatMap((r: any) => delegationRows(r?.delegatedResource, (x) => toBase58(x.to))),
+    in: ins.flatMap((r: any) => delegationRows(r?.delegatedResource, (x) => toBase58(x.from))),
+    maxDelegatable: { energy: (maxE?.max_size ?? 0) / SUN, bandwidth: (maxB?.max_size ?? 0) / SUN },
+    maxLockPeriodBlocks: params.find((p: any) => p.key === 'getMaxDelegateLockPeriod')?.value ?? 86400
   }
 }
 
@@ -183,6 +227,34 @@ export const unstake = (id: number, amount: number, resource: Resource, opts?: T
 
 export const withdrawUnfrozen = (id: number, opts?: TxOptions) =>
   withKey(id, (t, from) => t.transactionBuilder.withdrawExpireUnfreeze(from, permIdOpt(opts)))
+
+export const cancelUnstakes = (id: number, opts?: TxOptions) =>
+  withKey(id, (t, from) => t.transactionBuilder.cancelUnfreezeBalanceV2(from, permIdOpt(opts)))
+
+export const delegate = (
+  id: number,
+  receiver: string,
+  amount: number,
+  resource: Resource,
+  lockPeriodBlocks: number,
+  opts?: TxOptions
+) =>
+  withKey(id, (t, from) =>
+    t.transactionBuilder.delegateResource(
+      Math.round(amount * SUN),
+      receiver,
+      resource,
+      from,
+      lockPeriodBlocks > 0,
+      lockPeriodBlocks > 0 ? Math.floor(lockPeriodBlocks) : undefined,
+      permIdOpt(opts)
+    )
+  )
+
+export const undelegate = (id: number, receiver: string, amount: number, resource: Resource, opts?: TxOptions) =>
+  withKey(id, (t, from) =>
+    t.transactionBuilder.undelegateResource(Math.round(amount * SUN), receiver, resource, from, permIdOpt(opts))
+  )
 
 export const vote = (id: number, votes: Record<string, number>, opts?: TxOptions) =>
   withKey(id, (t, from) => t.transactionBuilder.vote(votes, from, permIdOpt(opts)))

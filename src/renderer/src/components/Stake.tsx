@@ -62,6 +62,17 @@ export function Stake({ from, balances, runTx, busy }: Props) {
         >
           Withdraw unstaked ({fmt(withdrawable)} TRX ready)
         </button>
+        {(balances?.unfreezing.length ?? 0) > 0 && (
+          <button
+            disabled={busy}
+            title="Re-stakes everything still unstaking and withdraws what is already unlocked"
+            onClick={() =>
+              runTx(`Cancel pending unstakes #${from.id}`, () => window.api.cancelUnstakes(from.id, toOpts(permId)))
+            }
+          >
+            Cancel pending unstakes
+          </button>
+        )}
       </div>
       <div className="muted small">Unstaked TRX becomes withdrawable after the unlock period (14 days on mainnet).</div>
     </div>

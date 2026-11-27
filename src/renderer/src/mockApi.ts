@@ -36,7 +36,9 @@ const bal = (address: string, trx: number, usdt: number, active = true): Balance
   frozen: trx > 1000 ? [{ type: 'ENERGY', amount: 2000 }, { type: 'BANDWIDTH', amount: 500 }] : [],
   unfreezing: trx > 1000 ? [{ amount: 100, expireAt: Date.now() + 86400e3 * 3 }] : [],
   tronPower: trx > 1000 ? 2500 : 0,
-  votes: trx > 1000 ? [{ address: 'TGzz8gjYiYRqpfmDwnLxfgPuLVNmpCswVp', count: 1500 }] : []
+  votes: trx > 1000 ? [{ address: 'TGzz8gjYiYRqpfmDwnLxfgPuLVNmpCswVp', count: 1500 }] : [],
+  delegatedOut: trx > 1000 ? { energy: 500, bandwidth: 0 } : { energy: 0, bandwidth: 0 },
+  delegatedIn: trx === 12 ? { energy: 500, bandwidth: 0 } : { energy: 0, bandwidth: 0 }
 })
 
 const balances: Record<string, Balances> = {
@@ -118,6 +120,19 @@ export function installMockApi() {
         witness: null,
         actives: [{ type: 2, id: 2, permission_name: 'active0', threshold: 1, operations: DEFAULT_OPS, keys: [{ address, weight: 1 }] }]
       }),
+    delegationInfo: (a: string) =>
+      wait({
+        out: a === fileKeys[0].address
+          ? [
+              { address: vaultKeys[0].address, resource: 'ENERGY', amount: 400, lockedUntil: 0 },
+              { address: 'TGzz8gjYiYRqpfmDwnLxfgPuLVNmpCswVp', resource: 'ENERGY', amount: 100, lockedUntil: Date.now() + 86400e3 * 2 }
+            ]
+          : [],
+        in: a === vaultKeys[0].address ? [{ address: fileKeys[0].address, resource: 'ENERGY', amount: 400, lockedUntil: 0 }] : [],
+        maxDelegatable: a === fileKeys[0].address ? { energy: 1500, bandwidth: 500 } : { energy: 0, bandwidth: 0 },
+        maxLockPeriodBlocks: 864000
+      }),
+    delegate: tx, undelegate: tx, cancelUnstakes: tx,
     sendTrx: tx, sendUsdt: tx, stake: tx, unstake: tx, withdrawUnfrozen: tx, vote: tx, updatePermissions: tx,
     explorerUrl: (id: string) => wait(`https://shasta.tronscan.org/#/transaction/${id}`)
   }

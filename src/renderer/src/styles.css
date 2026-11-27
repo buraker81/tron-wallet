@@ -273,3 +273,7 @@ textarea { font: inherit; color: var(--ink); background: var(--field); border: 1
 textarea:focus { outline: none; border-color: var(--ink); }
 ol.seed { list-style: none; margin: 0; padding: 12px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px 16px; background: var(--bg); border: 1px solid var(--line); user-select: all; }
 pre.secret { word-break: break-all; white-space: pre-wrap; user-select: all; }
+
+/* ---------- delegate ---------- */
+label.check { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.deleg-table { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }

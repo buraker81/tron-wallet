@@ -85,6 +85,10 @@ app.whenReady().then(() => {
   handle('unstake', tron.unstake)
   handle('withdrawUnfrozen', tron.withdrawUnfrozen)
   handle('vote', tron.vote)
+  handle('cancelUnstakes', tron.cancelUnstakes)
+  handle('delegationInfo', tron.delegationInfo)
+  handle('delegate', tron.delegate)
+  handle('undelegate', tron.undelegate)
   handle('updatePermissions', tron.updatePermissions)
   handle('explorerUrl', tron.explorerUrl)
 

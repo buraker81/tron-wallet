@@ -41,6 +41,26 @@ export interface Balances {
   unfreezing: { amount: number; expireAt: number }[]
   tronPower: number
   votes: { address: string; count: number }[]
+  /** TRX delegated to others / received from others, per resource */
+  delegatedOut: { energy: number; bandwidth: number }
+  delegatedIn: { energy: number; bandwidth: number }
+}
+
+export interface Delegation {
+  /** the other side: receiver for outgoing, delegator for incoming */
+  address: string
+  resource: Resource
+  amount: number
+  /** ms timestamp; 0 when not locked */
+  lockedUntil: number
+}
+
+export interface DelegationInfo {
+  out: Delegation[]
+  in: Delegation[]
+  maxDelegatable: { energy: number; bandwidth: number }
+  /** chain limit in blocks (3 s each) */
+  maxLockPeriodBlocks: number
 }
 
 export interface TxResult {
@@ -138,6 +158,17 @@ export interface Api {
   stake(id: number, amount: number, resource: Resource, opts?: TxOptions): Promise<TxResult>
   unstake(id: number, amount: number, resource: Resource, opts?: TxOptions): Promise<TxResult>
   withdrawUnfrozen(id: number, opts?: TxOptions): Promise<TxResult>
+  cancelUnstakes(id: number, opts?: TxOptions): Promise<TxResult>
+  delegationInfo(address: string): Promise<DelegationInfo>
+  delegate(
+    id: number,
+    receiver: string,
+    amount: number,
+    resource: Resource,
+    lockPeriodBlocks: number,
+    opts?: TxOptions
+  ): Promise<TxResult>
+  undelegate(id: number, receiver: string, amount: number, resource: Resource, opts?: TxOptions): Promise<TxResult>
   vote(id: number, votes: Record<string, number>, opts?: TxOptions): Promise<TxResult>
   updatePermissions(
     id: number,

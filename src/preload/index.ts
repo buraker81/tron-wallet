@@ -7,7 +7,7 @@ const channels = [
   'revealPrivateKey', 'revealMnemonic',
   'listNodes', 'saveNode', 'deleteNode', 'selectNode', 'testNode',
   'getNetwork', 'setNetwork', 'balances', 'listSRs', 'getPermissions',
-  'sendTrx', 'sendUsdt', 'stake', 'unstake', 'withdrawUnfrozen', 'vote',
+  'sendTrx', 'sendUsdt', 'stake', 'unstake', 'withdrawUnfrozen', 'vote', 'cancelUnstakes', 'delegationInfo', 'delegate', 'undelegate',
   'updatePermissions', 'explorerUrl'
 ]
 

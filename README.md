@@ -2,7 +2,7 @@
 
 A minimal desktop wallet for experimenting with TRON transaction types on **Shasta** / **Nile** testnets (with a Mainnet toggle).
 
-Features: balances & resources, Send TRX, Send USDT (TRC20), Stake 2.0 (stake / unstake / withdraw), Vote for SRs, Account Permissions (owner/active, multisig). Every form has an optional `Permission ID` field for multisig tests.
+Features: balances & resources, Send TRX, Send USDT (TRC20), Stake 2.0 (stake / unstake / withdraw / cancel unstakes), resource delegation (delegate / reclaim, optional lock), Vote for SRs, Account Permissions (owner/active, multisig). Every form has an optional `Permission ID` field for multisig tests.
 
 ## Setup
 
@@ -38,6 +38,13 @@ Monospace (IBM Plex Mono), flat, light and dark themes (toggle in the header; de
 
 Preview the UI in a normal browser with fake data: run `npm run dev` and open `http://localhost:5173`
 (when the Electron preload is missing, a dev-only mock API is used).
+
+## Delegation
+
+The `delegate` tab lends energy or bandwidth from staked TRX to another address (Stake 2.0 `DelegateResource`).
+It shows how much you can delegate right now, lets you lock a delegation for a number of days (capped by the chain's
+`getMaxDelegateLockPeriod`, 3 s blocks), and lists delegations out (with *reclaim*, full or partial, disabled while
+locked) and received.
 
 ## Nodes
 

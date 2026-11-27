@@ -4,13 +4,14 @@ import { fmt, short } from './ui'
 import { SendTrx, SendUsdt } from './components/Send'
 import { Stake } from './components/Stake'
 import { Vote } from './components/Vote'
+import { Delegate } from './components/Delegate'
 import { Permissions } from './components/Permissions'
 import { BalancesPanel } from './components/BalancesPanel'
 import { NETWORK_LABELS, NodesModal } from './components/NodesModal'
 import { CreateVaultModal, UnlockModal, VaultBar, VaultModal } from './components/Vault'
 import { AccountActions } from './components/AccountActions'
 
-const TABS = ['send-trx', 'send-usdt', 'stake', 'vote', 'permissions'] as const
+const TABS = ['send-trx', 'send-usdt', 'stake', 'delegate', 'vote', 'permissions'] as const
 type Tab = (typeof TABS)[number]
 
 interface LogEntry {
@@ -270,6 +271,9 @@ export default function App() {
                 {tab === 'send-trx' && <SendTrx from={selected} {...common} />}
                 {tab === 'send-usdt' && <SendUsdt from={selected} {...common} />}
                 {tab === 'stake' && <Stake from={selected} balances={bal} {...common} />}
+                {tab === 'delegate' && (
+                  <Delegate from={selected} balances={bal} network={network} {...common} />
+                )}
                 {tab === 'vote' && <Vote from={selected} balances={bal} network={network} {...common} />}
                 {tab === 'permissions' && <Permissions from={selected} network={network} {...common} />}
               </section>
