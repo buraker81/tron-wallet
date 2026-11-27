@@ -18,7 +18,7 @@ const txCheck: (tx: any) => boolean = (utils as any).transaction.txCheck
 // ---------- prepare ----------
 
 /** Adds the note and extends the expiration. Both change the txID, so they must happen before signing. */
-async function prepare(t: TronWeb, tx: any, opts?: TxOptions): Promise<any> {
+export async function prepare(t: TronWeb, tx: any, opts?: TxOptions): Promise<any> {
   // TronWeb's local alteration leaves `signature: undefined` behind, which makes the next
   // alteration think the tx is signed. Drop the empty key after each step.
   const clean = (x: any) => {

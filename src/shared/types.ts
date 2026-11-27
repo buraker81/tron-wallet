@@ -129,6 +129,69 @@ export interface AccountPermissions {
   actives: Permission[]
 }
 
+export type TxAction =
+  | 'sendTrx'
+  | 'sendUsdt'
+  | 'stake'
+  | 'unstake'
+  | 'withdrawUnfrozen'
+  | 'cancelUnstakes'
+  | 'delegate'
+  | 'undelegate'
+  | 'vote'
+  | 'claimRewards'
+  | 'updatePermissions'
+
+export interface RewardInfo {
+  /** TRX */
+  claimable: number
+  /** ms timestamps; 0 when never claimed */
+  lastClaim: number
+  nextClaim: number
+}
+
+export interface FeeEstimate {
+  bytes: number
+  /** how the bandwidth is paid */
+  bandwidth: { source: 'staked' | 'free' | 'burn'; available: { staked: number; free: number }; burnTrx: number }
+  energy: { required: number; available: number; burnTrx: number }
+  /** extra fixed fees in TRX */
+  fees: { label: string; trx: number }[]
+  totalTrx: number
+  warnings: string[]
+}
+
+export interface HistoryItem {
+  txid: string
+  time: number
+  type: string
+  direction: 'in' | 'out' | 'self' | 'other'
+  counterparty?: string
+  amount?: string
+  result: string
+  feeTrx: number
+  energy: number
+  bandwidth: number
+  note?: string
+}
+
+export interface HistoryPage {
+  items: HistoryItem[]
+  next?: string
+  /** host the history came from */
+  source: string
+  fallback: boolean
+}
+
+export interface TxReceipt {
+  found: boolean
+  result?: string
+  feeTrx?: number
+  energy?: number
+  bandwidth?: number
+  block?: number
+}
+
 export interface TxOptions {
   permissionId?: number
   /** key ids that sign; defaults to the account's own key */
@@ -201,6 +264,11 @@ export interface Api {
   cancelUnstakes(id: number, opts?: TxOptions): Promise<TxResult>
   delegationInfo(address: string): Promise<DelegationInfo>
   getMemoFee(): Promise<number>
+  estimateTx(action: TxAction, id: number, args: unknown[], opts?: TxOptions): Promise<FeeEstimate>
+  rewardInfo(address: string): Promise<RewardInfo>
+  claimRewards(id: number, opts?: TxOptions): Promise<TxResult>
+  history(address: string, kind: 'all' | 'trc20', fingerprint?: string): Promise<HistoryPage>
+  txReceipt(txid: string): Promise<TxReceipt>
   inspectTx(json: string): Promise<TxSummary>
   signTx(json: string, signerIds: number[]): Promise<{ json: string; summary: TxSummary }>
   broadcastTx(json: string): Promise<TxResult>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Balances, NetworkId, NodeState, PublicKey, TxResult, VaultStatus } from '../../shared/types'
+import type { Balances, NetworkId, NodeState, PublicKey, TxReceipt, TxResult, VaultStatus } from '../../shared/types'
 import { TxContext, fmt, short } from './ui'
 import { SendTrx, SendUsdt } from './components/Send'
 import { Stake } from './components/Stake'
@@ -11,8 +11,9 @@ import { NETWORK_LABELS, NodesModal } from './components/NodesModal'
 import { CreateVaultModal, UnlockModal, VaultBar, VaultModal } from './components/Vault'
 import { AccountActions } from './components/AccountActions'
 import { SignTx, type PendingEntry } from './components/SignTx'
+import { History } from './components/History'
 
-const TABS = ['send-trx', 'send-usdt', 'stake', 'delegate', 'vote', 'permissions', 'sign-tx'] as const
+const TABS = ['send-trx', 'send-usdt', 'stake', 'delegate', 'vote', 'permissions', 'sign-tx', 'history'] as const
 type Tab = (typeof TABS)[number]
 
 interface LogEntry {
@@ -22,6 +23,8 @@ interface LogEntry {
   result?: TxResult
   error?: string
   url?: string
+  /** filled in once the tx is found in a block */
+  receipt?: TxReceipt
 }
 
 /** Runs a tx action with mainnet confirmation and logging. Resolves to the result, or undefined if cancelled/failed. */
@@ -148,6 +151,7 @@ export default function App() {
       }
       const url = result.txid ? await window.api.explorerUrl(result.txid) : undefined
       setLog((l) => [{ time, network: net, label, result, url }, ...l])
+      if (result.ok) pollReceipt(result.txid)
       // give the node a moment to include the tx before refreshing
       setTimeout(() => refresh(keys), 3500)
       return result
@@ -157,6 +161,21 @@ export default function App() {
     } finally {
       setBusy(false)
     }
+  }
+
+  /** Poll for the mined receipt (real fee / energy / result) for up to ~30 s. */
+  const pollReceipt = (txid: string) => {
+    let tries = 0
+    const tick = async () => {
+      tries++
+      const r = await window.api.txReceipt(txid).catch(() => undefined)
+      if (r?.found) {
+        setLog((l) => l.map((e) => (e.result?.txid === txid ? { ...e, receipt: r } : e)))
+        return
+      }
+      if (tries < 10) setTimeout(tick, 3000)
+    }
+    setTimeout(tick, 3000)
   }
 
   const openPending = (json: string) => {
@@ -314,6 +333,7 @@ export default function App() {
                     busy={busy}
                   />
                 )}
+                {tab === 'history' && <History from={selected} keys={keys} network={network} />}
                 {tab === 'permissions' && <Permissions from={selected} network={network} {...common} />}
               </section>
             </>
@@ -352,7 +372,23 @@ export default function App() {
               )}
               {e.result && !e.result.pending && (
                 <>
-                  <span className={e.result.ok ? 'ok' : 'error'}>{e.result.ok ? 'ok' : `err ${e.result.message}`}</span>
+                  {!e.result.ok && <span className="error">err {e.result.message}</span>}
+                  {e.result.ok && !e.receipt && <span className="ok">sent · confirming…</span>}
+                  {e.receipt && e.receipt.result === 'SUCCESS' && (
+                    <span className="ok">
+                      confirmed
+                      <span className="muted">
+                        {' '}
+                        · fee {fmt(e.receipt.feeTrx ?? 0, 4)} trx · energy {fmt(e.receipt.energy ?? 0, 0)} · bw{' '}
+                        {fmt(e.receipt.bandwidth ?? 0, 0)}
+                      </span>
+                    </span>
+                  )}
+                  {e.receipt && e.receipt.result !== 'SUCCESS' && (
+                    <span className="error">
+                      failed: {e.receipt.result?.toLowerCase()} · fee {fmt(e.receipt.feeTrx ?? 0, 4)} trx
+                    </span>
+                  )}
                   {e.url && (
                     <a href={e.url} target="_blank" rel="noreferrer">
                       {short(e.result.txid)}

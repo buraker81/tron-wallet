@@ -6,6 +6,8 @@ import * as vault from './vault'
 import * as tron from './tron'
 import * as nodes from './nodes'
 import * as multisig from './multisig'
+import { estimateTx } from './estimate'
+import * as hist from './history'
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -89,6 +91,11 @@ app.whenReady().then(() => {
   handle('cancelUnstakes', tron.cancelUnstakes)
   handle('delegationInfo', tron.delegationInfo)
   handle('getMemoFee', multisig.getMemoFee)
+  handle('estimateTx', estimateTx)
+  handle('rewardInfo', tron.rewardInfo)
+  handle('claimRewards', tron.claimRewards)
+  handle('history', hist.history)
+  handle('txReceipt', hist.txReceipt)
   handle('inspectTx', multisig.inspectTx)
   handle('signTx', multisig.signTx)
   handle('broadcastTx', multisig.broadcastTx)

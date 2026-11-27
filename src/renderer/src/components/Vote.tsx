@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
+import type { RewardInfo } from '../../../shared/types'
 import type { Balances, NetworkId, PublicKey, SR } from '../../../shared/types'
 import type { RunTx } from '../App'
-import { TxOptionsInput, EMPTY_TX_OPTS, fmt, short, toOpts } from '../ui'
+import { TxOptionsInput, EMPTY_TX_OPTS, fmt, short, toOpts, type TxOptsState } from '../ui'
+import { FeeEstimate } from './FeeEstimate'
 
 interface Props {
   from: PublicKey
@@ -45,6 +47,7 @@ export function Vote({ from, balances, network, runTx, busy }: Props) {
 
   return (
     <div className="form">
+      <Rewards from={from} balances={balances} network={network} runTx={runTx} busy={busy} permId={permId} />
       <div className="row">
         <span>
           Tron Power: <b>{fmt(power, 0)}</b> · Allocated: <b className={total > power ? 'error' : ''}>{total}</b>
@@ -73,6 +76,12 @@ export function Vote({ from, balances, network, runTx, busy }: Props) {
         ))}
       </div>
       <TxOptionsInput value={permId} onChange={setPermId} />
+      <FeeEstimate
+        action="vote"
+        args={[payload]}
+        opts={toOpts(permId)}
+        enabled={Object.keys(payload).length > 0 && total <= power}
+      />
       <button
         className="primary"
         disabled={busy || Object.keys(payload).length === 0 || total > power}
@@ -84,6 +93,55 @@ export function Vote({ from, balances, network, runTx, busy }: Props) {
       >
         Submit votes
       </button>
+    </div>
+  )
+}
+
+/** Unclaimed voting rewards + claim (WithdrawBalance, once per 24 h). */
+function Rewards({ from, balances, network, runTx, busy, permId }: {
+  from: PublicKey
+  balances?: Balances
+  network: NetworkId
+  runTx: RunTx
+  busy: boolean
+  permId: TxOptsState
+}) {
+  const [info, setInfo] = useState<RewardInfo>()
+  const [error, setError] = useState<string>()
+  useEffect(() => {
+    setError(undefined)
+    window.api.rewardInfo(from.address).then(setInfo).catch((e) => setError(e.message))
+  }, [from.address, network, balances])
+
+  const cooling = !!info && info.nextClaim > Date.now()
+  return (
+    <div className="rewards">
+      <div className="row" style={{ alignItems: 'center' }}>
+        <span className="muted">voting rewards</span>
+        <b>{info ? `${fmt(info.claimable)} trx` : error ? '—' : '…'}</b>
+        {info && info.lastClaim > 0 && (
+          <span className="muted small">last claim {new Date(info.lastClaim).toLocaleString('en-GB')}</span>
+        )}
+        <span className="spacer" />
+        <button
+          disabled={busy || !info || info.claimable <= 0 || cooling}
+          title={cooling ? 'Rewards can be claimed once every 24 hours' : undefined}
+          onClick={() =>
+            runTx(`Claim ${fmt(info!.claimable)} TRX voting rewards #${from.id}`, () =>
+              window.api.claimRewards(from.id, toOpts(permId))
+            )
+          }
+        >
+          claim
+        </button>
+      </div>
+      {cooling && (
+        <div className="muted small">next claim possible after {new Date(info!.nextClaim).toLocaleString('en-GB')}</div>
+      )}
+      {error && <div className="error small">{error}</div>}
+      {info && info.claimable > 0 && !cooling && (
+        <FeeEstimate action="claimRewards" args={[]} opts={toOpts(permId)} enabled />
+      )}
     </div>
   )
 }

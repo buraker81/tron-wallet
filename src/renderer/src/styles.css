@@ -293,3 +293,20 @@ button.pending-item.on { background: var(--ink); color: var(--bg); }
 button.pending-item.on .muted { color: var(--sel-muted); }
 dd.mono-wrap { word-break: break-all; }
 button.pending-item { text-transform: none; }
+
+/* ---------- estimate / rewards / history ---------- */
+.estimate { display: flex; flex-direction: column; gap: 3px; padding: 8px 12px; border: 1px solid var(--line); background: var(--panel); font-size: 12px; }
+.estimate.stale { opacity: .55; }
+.estimate-total { display: flex; gap: 12px; align-items: baseline; }
+.estimate-lines { display: flex; flex-direction: column; gap: 1px; color: var(--ink-2); }
+div.estimate.muted { color: var(--muted); }
+.rewards { display: flex; flex-direction: column; gap: 6px; padding-bottom: 14px; border-bottom: 1px solid var(--line-soft); }
+.history { max-width: none; }
+table.hist td { word-break: normal; }
+table.hist .note { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+td.dir { font-weight: 600; text-align: center; width: 24px; }
+td.dir.in { color: var(--ok); }
+td.dir.out { color: var(--ink); }
+.table-scroll { overflow-x: auto; }
+table.hist { font-size: 12px; }
+table.hist td, table.hist th { padding: 5px 7px; }

@@ -10,6 +10,8 @@ import type {
   Permission,
   Resource,
   SR,
+  RewardInfo,
+  TxAction,
   TxOptions,
   TxResult
 } from '../shared/types'
@@ -156,45 +158,67 @@ export async function getPermissions(address: string): Promise<AccountPermission
 
 // ---------- writes ----------
 
-export const sendTrx = (id: number, to: string, amount: number, opts?: TxOptions) =>
-  withKey(id, (t, from) =>
-    t.transactionBuilder.sendTrx(to, Math.round(amount * SUN), from, permIdOpt(opts)),
-  opts
-  )
+const sun = (trx: number) => Math.round(trx * SUN)
 
-export const sendUsdt = (id: number, to: string, amount: number, opts?: TxOptions) =>
-  withKey(id, async (t, from) => {
+/**
+ * Unsigned tx builders, keyed by action name. The same builder is used to send (execute) and to
+ * estimate fees, so the estimate is for exactly the tx that would be signed.
+ */
+export const BUILDERS: Record<TxAction, (t: TronWeb, from: string, args: any[], o?: TxOptions) => Promise<any>> = {
+  sendTrx: (t, from, [to, amount], o) => t.transactionBuilder.sendTrx(to, sun(amount), from, permIdOpt(o)),
+  sendUsdt: async (t, from, [to, amount], o) => {
     const { transaction } = await t.transactionBuilder.triggerSmartContract(
       NETWORKS[getNetwork()].usdt,
       'transfer(address,uint256)',
-      { feeLimit: 100 * SUN, ...permIdOpt(opts) },
+      { feeLimit: USDT_FEE_LIMIT_TRX * SUN, ...permIdOpt(o) },
       [
         { type: 'address', value: to },
-        { type: 'uint256', value: BigInt(Math.round(amount * SUN)).toString() }
+        { type: 'uint256', value: BigInt(sun(amount)).toString() }
       ],
       from
     )
     return transaction
-  }, opts)
+  },
+  stake: (t, from, [amount, resource], o) => t.transactionBuilder.freezeBalanceV2(sun(amount), resource, from, permIdOpt(o)),
+  unstake: (t, from, [amount, resource], o) =>
+    t.transactionBuilder.unfreezeBalanceV2(sun(amount), resource, from, permIdOpt(o)),
+  withdrawUnfrozen: (t, from, _a, o) => t.transactionBuilder.withdrawExpireUnfreeze(from, permIdOpt(o)),
+  cancelUnstakes: (t, from, _a, o) => t.transactionBuilder.cancelUnfreezeBalanceV2(from, permIdOpt(o)),
+  delegate: (t, from, [receiver, amount, resource, lockPeriodBlocks], o) =>
+    t.transactionBuilder.delegateResource(
+      sun(amount),
+      receiver,
+      resource,
+      from,
+      lockPeriodBlocks > 0,
+      lockPeriodBlocks > 0 ? Math.floor(lockPeriodBlocks) : undefined,
+      permIdOpt(o)
+    ),
+  undelegate: (t, from, [receiver, amount, resource], o) =>
+    t.transactionBuilder.undelegateResource(sun(amount), receiver, resource, from, permIdOpt(o)),
+  vote: (t, from, [votes], o) => t.transactionBuilder.vote(votes, from, permIdOpt(o)),
+  claimRewards: (t, from, _a, o) => t.transactionBuilder.withdrawBlockRewards(from, permIdOpt(o)),
+  updatePermissions: (t, from, [owner, actives], o) =>
+    t.transactionBuilder.updateAccountPermissions(from, owner as any, null, actives as any, permIdOpt(o))
+}
 
+export const USDT_FEE_LIMIT_TRX = 100
+
+export const runAction = (action: TxAction, id: number, args: any[], opts?: TxOptions): Promise<TxResult> => {
+  if (!BUILDERS[action]) throw new Error(`Unknown action: ${action}`)
+  return withKey(id, (t, from) => BUILDERS[action](t, from, args, opts), opts)
+}
+
+export const sendTrx = (id: number, to: string, amount: number, opts?: TxOptions) =>
+  runAction('sendTrx', id, [to, amount], opts)
+export const sendUsdt = (id: number, to: string, amount: number, opts?: TxOptions) =>
+  runAction('sendUsdt', id, [to, amount], opts)
 export const stake = (id: number, amount: number, resource: Resource, opts?: TxOptions) =>
-  withKey(id, (t, from) =>
-    t.transactionBuilder.freezeBalanceV2(Math.round(amount * SUN), resource, from, permIdOpt(opts)),
-  opts
-  )
-
+  runAction('stake', id, [amount, resource], opts)
 export const unstake = (id: number, amount: number, resource: Resource, opts?: TxOptions) =>
-  withKey(id, (t, from) =>
-    t.transactionBuilder.unfreezeBalanceV2(Math.round(amount * SUN), resource, from, permIdOpt(opts)),
-  opts
-  )
-
-export const withdrawUnfrozen = (id: number, opts?: TxOptions) =>
-  withKey(id, (t, from) => t.transactionBuilder.withdrawExpireUnfreeze(from, permIdOpt(opts)), opts)
-
-export const cancelUnstakes = (id: number, opts?: TxOptions) =>
-  withKey(id, (t, from) => t.transactionBuilder.cancelUnfreezeBalanceV2(from, permIdOpt(opts)), opts)
-
+  runAction('unstake', id, [amount, resource], opts)
+export const withdrawUnfrozen = (id: number, opts?: TxOptions) => runAction('withdrawUnfrozen', id, [], opts)
+export const cancelUnstakes = (id: number, opts?: TxOptions) => runAction('cancelUnstakes', id, [], opts)
 export const delegate = (
   id: number,
   receiver: string,
@@ -202,44 +226,20 @@ export const delegate = (
   resource: Resource,
   lockPeriodBlocks: number,
   opts?: TxOptions
-) =>
-  withKey(id, (t, from) =>
-    t.transactionBuilder.delegateResource(
-      Math.round(amount * SUN),
-      receiver,
-      resource,
-      from,
-      lockPeriodBlocks > 0,
-      lockPeriodBlocks > 0 ? Math.floor(lockPeriodBlocks) : undefined,
-      permIdOpt(opts)
-    ),
-  opts
-  )
-
+) => runAction('delegate', id, [receiver, amount, resource, lockPeriodBlocks], opts)
 export const undelegate = (id: number, receiver: string, amount: number, resource: Resource, opts?: TxOptions) =>
-  withKey(id, (t, from) =>
-    t.transactionBuilder.undelegateResource(Math.round(amount * SUN), receiver, resource, from, permIdOpt(opts)),
-  opts
-  )
+  runAction('undelegate', id, [receiver, amount, resource], opts)
+export const vote = (id: number, votes: Record<string, number>, opts?: TxOptions) => runAction('vote', id, [votes], opts)
+export const claimRewards = (id: number, opts?: TxOptions) => runAction('claimRewards', id, [], opts)
+export const updatePermissions = (id: number, owner: Permission, actives: Permission[], opts?: TxOptions) =>
+  runAction('updatePermissions', id, [owner, actives], opts)
 
-export const vote = (id: number, votes: Record<string, number>, opts?: TxOptions) =>
-  withKey(id, (t, from) => t.transactionBuilder.vote(votes, from, permIdOpt(opts)), opts)
-
-export const updatePermissions = (
-  id: number,
-  owner: Permission,
-  actives: Permission[],
-  opts?: TxOptions
-) =>
-  withKey(id, (t, from) =>
-    t.transactionBuilder.updateAccountPermissions(
-      from,
-      owner as any,
-      null,
-      actives as any,
-      permIdOpt(opts)
-    ),
-  opts
-  )
+/** Unclaimed voting rewards and when the next claim is allowed (one WithdrawBalance per 24 h). */
+export async function rewardInfo(address: string): Promise<RewardInfo> {
+  const t = tw()
+  const [reward, account]: any[] = await Promise.all([t.trx.getReward(address).catch(() => 0), t.trx.getAccount(address)])
+  const last = Number(account?.latest_withdraw_time ?? 0)
+  return { claimable: Number(reward ?? 0) / SUN, lastClaim: last, nextClaim: last ? last + 86_400_000 : 0 }
+}
 
 export const explorerUrl = (txid: string) => NETWORKS[getNetwork()].explorer + txid

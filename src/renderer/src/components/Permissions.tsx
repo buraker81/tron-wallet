@@ -4,6 +4,7 @@ import type { RunTx } from '../App'
 import { AddressInput, Field, TxOptionsInput, EMPTY_TX_OPTS, toOpts } from '../ui'
 import { DEFAULT_OPS } from '../../../shared/operations'
 import { OperationsEditor } from './OperationsEditor'
+import { FeeEstimate } from './FeeEstimate'
 
 interface Props {
   from: PublicKey
@@ -47,14 +48,15 @@ export function Permissions({ from, keys, network, runTx, busy }: Props) {
   }
   useEffect(load, [from.address, network])
 
+  const clean = (p: Permission): Permission => ({
+    type: p.type,
+    permission_name: p.permission_name,
+    threshold: Number(p.threshold),
+    ...(p.type === 2 ? { operations: p.operations || DEFAULT_OPS } : {}),
+    keys: p.keys.filter((k) => k.address).map((k) => ({ address: k.address, weight: Number(k.weight) }))
+  })
+
   const submit = () => {
-    const clean = (p: Permission): Permission => ({
-      type: p.type,
-      permission_name: p.permission_name,
-      threshold: Number(p.threshold),
-      ...(p.type === 2 ? { operations: p.operations || DEFAULT_OPS } : {}),
-      keys: p.keys.filter((k) => k.address).map((k) => ({ address: k.address, weight: Number(k.weight) }))
-    })
     runTx(`Update permissions #${from.id} (owner thr ${owner.threshold}, ${actives.length} active)`, () =>
       window.api.updatePermissions(from.id, clean(owner), actives.map(clean), toOpts(permId))
     )
@@ -91,6 +93,12 @@ export function Permissions({ from, keys, network, runTx, busy }: Props) {
         <button onClick={load}>Reset to on-chain</button>
       </div>
       <TxOptionsInput value={permId} onChange={setPermId} />
+      <FeeEstimate
+        action="updatePermissions"
+        args={[clean(owner), actives.map(clean)]}
+        opts={toOpts(permId)}
+        enabled={!!current}
+      />
       <button className="primary danger" disabled={busy} onClick={submit}>
         Update account permissions
       </button>

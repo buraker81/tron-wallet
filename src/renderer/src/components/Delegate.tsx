@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { Balances, Delegation, DelegationInfo, NetworkId, PublicKey, Resource } from '../../../shared/types'
 import type { RunTx } from '../App'
 import { AddressInput, Field, TxOptionsInput, EMPTY_TX_OPTS, fmt, short, toOpts } from '../ui'
+import { FeeEstimate } from './FeeEstimate'
 
 const BLOCK_SECONDS = 3
 const blocksToText = (blocks: number) => {
@@ -115,6 +116,12 @@ export function Delegate({ from, keys, balances, network, runTx, busy }: Props) 
       {lockTooLong && <div className="error">Lock period is longer than the chain allows.</div>}
       {n > max && max > 0 && <div className="error">Amount is more than you can delegate.</div>}
       <TxOptionsInput value={permId} onChange={setPermId} />
+      <FeeEstimate
+        action="delegate"
+        args={[to, n, resource, lockBlocks]}
+        opts={toOpts(permId)}
+        enabled={canDelegate}
+      />
       <button
         className="primary"
         disabled={!canDelegate || busy}

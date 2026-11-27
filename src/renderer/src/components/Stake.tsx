@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { Balances, PublicKey, Resource } from '../../../shared/types'
 import type { RunTx } from '../App'
 import { Field, TxOptionsInput, EMPTY_TX_OPTS, fmt, toOpts } from '../ui'
+import { FeeEstimate } from './FeeEstimate'
 
 interface Props {
   from: PublicKey
@@ -32,6 +33,7 @@ export function Stake({ from, balances, runTx, busy }: Props) {
         </select>
       </Field>
       <TxOptionsInput value={permId} onChange={setPermId} />
+      <FeeEstimate action="stake" args={[n, resource]} opts={toOpts(permId)} enabled={n > 0} />
       <div className="row">
         <button
           className="primary"

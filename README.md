@@ -2,7 +2,7 @@
 
 A minimal desktop wallet for experimenting with TRON transaction types on **Shasta** / **Nile** testnets (with a Mainnet toggle).
 
-Features: balances & resources, Send TRX, Send USDT (TRC20), Stake 2.0 (stake / unstake / withdraw / cancel unstakes), resource delegation (delegate / reclaim, optional lock), Vote for SRs, Account Permissions (owner/active, multisig). Every form has an optional `Permission ID` field for multisig tests.
+Features: balances & resources, Send TRX, Send USDT (TRC20), Stake 2.0 (stake / unstake / withdraw / cancel unstakes), resource delegation (delegate / reclaim, optional lock), Vote for SRs + claim rewards, fee estimates, tx history, Account Permissions (owner/active, multisig). Every form has an optional `Permission ID` field for multisig tests.
 
 ## Setup
 
@@ -38,6 +38,22 @@ Monospace (IBM Plex Mono), flat, light and dark themes (toggle in the header; de
 
 Preview the UI in a normal browser with fake data: run `npm run dev` and open `http://localhost:5173`
 (when the Electron preload is missing, a dev-only mock API is used).
+
+## Fee estimate, receipts and history
+
+- **Estimate**: every form shows the expected cost of the exact tx it would send (same builder, including note,
+  signers and permission id), refreshed as you type:
+  - bandwidth: tx bytes and whether staked bandwidth, the free daily allowance, or burned TRX pays for it
+  - energy (TRC20): `estimateEnergy` (falls back to a constant call), available energy, TRX burned for the rest;
+    warns if it would exceed the 100 TRX fee limit
+  - fixed fees: new account activation (TRX to an inactive address), memo, multi-signature, permission update
+  - fee parameters are read from the chain (`getChainParameters`)
+- **Receipts**: after a broadcast the log polls `getTransactionInfo` and shows the real result, fee, energy and
+  bandwidth once the tx is in a block (or the failure reason, e.g. `out_of_energy`).
+- **History** tab: transactions and TRC20 transfers of the selected address from the TronGrid v1 API, with
+  direction, counterparty (named if it is one of your keys), amount, note, fee / energy / bandwidth and result.
+  Paged with *load more*. If the active node is not TronGrid, the built-in TronGrid host of the network is used.
+- **Voting rewards**: the vote tab shows unclaimed rewards and a *claim* button (WithdrawBalance, once per 24 h).
 
 ## Notes, signing and multisig
 
@@ -102,6 +118,8 @@ and the checkboxes update. Bit `N % 8` of byte `N / 8` enables contract type id 
 - `src/main/key.ts`: `Key` interface, `getKey(id)`, `listKeys()`
 - `src/main/tron.ts`: all TronWeb reads/writes
 - `src/main/networks.ts`: Shasta / Nile / Mainnet defaults + USDT contracts
+- `src/main/estimate.ts`: fee / bandwidth / energy estimate
+- `src/main/history.ts`: TronGrid v1 history and tx receipts
 - `src/main/multisig.ts`: signing pipeline (note, expiration, signer checks, weight, broadcast) and sign-tx tools
 - `src/main/client.ts`: TronWeb client for the active node / network
 - `src/main/vault.ts`: encrypted vault, HD derivation, key import/export

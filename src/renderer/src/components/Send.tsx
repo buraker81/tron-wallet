@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { PublicKey } from '../../../shared/types'
 import type { RunTx } from '../App'
 import { AddressInput, Field, TxOptionsInput, EMPTY_TX_OPTS, short, toOpts } from '../ui'
+import { FeeEstimate } from './FeeEstimate'
 
 interface Props {
   from: PublicKey
@@ -36,6 +37,12 @@ function SendForm({ from, keys, runTx, busy, token }: Props & { token: 'TRX' | '
       </Field>
       <TxOptionsInput value={permId} onChange={setPermId} />
       {token === 'USDT' && <div className="muted small">Fee limit: 100 TRX. Uses the network's USDT contract.</div>}
+      <FeeEstimate
+        action={token === 'TRX' ? 'sendTrx' : 'sendUsdt'}
+        args={[to, Number(amount)]}
+        opts={toOpts(permId)}
+        enabled={valid}
+      />
       <button className="primary" disabled={!valid || busy} onClick={submit}>
         {busy ? 'Sending…' : `Send ${token}`}
       </button>

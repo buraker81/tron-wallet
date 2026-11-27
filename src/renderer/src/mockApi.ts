@@ -152,6 +152,38 @@ export function installMockApi() {
       }),
     delegate: tx, undelegate: tx, cancelUnstakes: tx,
     getMemoFee: () => wait(1),
+    estimateTx: (action: string, _id: number, args: any[], opts?: any) => {
+      const fees: { label: string; trx: number }[] = []
+      if (action === 'sendTrx' && args[0] === vaultKeys[1].address) fees.push({ label: 'activate new account', trx: 1 })
+      if (opts?.note) fees.push({ label: 'note (memo)', trx: 1 })
+      if ((opts?.signers?.length ?? 0) > 1) fees.push({ label: 'multi-signature', trx: 1 })
+      if (action === 'updatePermissions') fees.push({ label: 'permission update', trx: 100 })
+      const energy = action === 'sendUsdt' ? { required: 64895, available: 50800, burnTrx: 1.4095 } : { required: 0, available: 50800, burnTrx: 0 }
+      const total = energy.burnTrx + fees.reduce((x, f) => x + f.trx, 0)
+      return wait({ bytes: action === 'sendUsdt' ? 345 : 267, bandwidth: { source: 'staked', available: { staked: 390, free: 600 }, burnTrx: 0 }, energy, fees, totalTrx: total, warnings: [] }, 250)
+    },
+    rewardInfo: () => wait({ claimable: 12.483921, lastClaim: Date.now() - 3 * 86400e3, nextClaim: Date.now() - 2 * 86400e3 }),
+    claimRewards: plainTx,
+    txReceipt: () => wait({ found: true, result: 'SUCCESS', feeTrx: 0.345, energy: 13045, bandwidth: 345, block: 70485000 }),
+    history: (_a: string, kind: string) =>
+      wait({
+        source: 'api.shasta.trongrid.io',
+        fallback: false,
+        next: undefined,
+        items: kind === 'trc20'
+          ? [
+              { txid: 'a1'.repeat(32), time: Date.now() - 3600e3, type: 'USDT transfer', direction: 'in', counterparty: 'TGNzrfuE14gMxBNwNVdzwFaMLHbm16rrKd', amount: '5.5 usdt', result: 'SUCCESS', feeTrx: 0, energy: 0, bandwidth: 0 },
+              { txid: 'b2'.repeat(32), time: Date.now() - 86400e3, type: 'USDT transfer', direction: 'out', counterparty: vaultKeys[0].address, amount: '20 usdt', result: 'SUCCESS', feeTrx: 0, energy: 0, bandwidth: 0 }
+            ]
+          : [
+              { txid: 'c3'.repeat(32), time: Date.now() - 600e3, type: 'Transfer', direction: 'out', counterparty: fileKeys[1].address, amount: '25 trx', result: 'SUCCESS', feeTrx: 0, energy: 0, bandwidth: 267, note: 'treasury payout #42' },
+              { txid: 'd4'.repeat(32), time: Date.now() - 7200e3, type: 'TriggerSmartContract', direction: 'out', counterparty: 'TG3XXyExBkPp9nzdajDZsozEu4BkaSJozs', amount: 'token transfer', result: 'SUCCESS', feeTrx: 1.4095, energy: 64895, bandwidth: 345 },
+              { txid: 'e5'.repeat(32), time: Date.now() - 9000e3, type: 'DelegateResource', direction: 'out', counterparty: vaultKeys[0].address, amount: '400 trx energy', result: 'SUCCESS', feeTrx: 0, energy: 0, bandwidth: 280 },
+              { txid: 'f6'.repeat(32), time: Date.now() - 86400e3, type: 'VoteWitness', direction: 'out', amount: '1500 votes', result: 'SUCCESS', feeTrx: 0, energy: 0, bandwidth: 270 },
+              { txid: '07'.repeat(32), time: Date.now() - 90000e3, type: 'TriggerSmartContract', direction: 'out', counterparty: 'TG3XXyExBkPp9nzdajDZsozEu4BkaSJozs', amount: 'token transfer', result: 'OUT_OF_ENERGY', feeTrx: 6.2, energy: 62000, bandwidth: 345 },
+              { txid: '18'.repeat(32), time: Date.now() - 172800e3, type: 'Transfer', direction: 'in', counterparty: 'TGNzrfuE14gMxBNwNVdzwFaMLHbm16rrKd', amount: '5000 trx', result: 'SUCCESS', feeTrx: 0, energy: 0, bandwidth: 0 }
+            ]
+      }),
     inspectTx: (json: string) => { try { return wait(summarize(json)) } catch (e) { return Promise.reject(e) } },
     signTx: (json: string, ids: number[]) => {
       const m = JSON.parse(json)
