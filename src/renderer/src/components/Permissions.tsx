@@ -2,9 +2,8 @@ import { useEffect, useState } from 'react'
 import type { AccountPermissions, NetworkId, Permission, PublicKey } from '../../../shared/types'
 import type { RunTx } from '../App'
 import { AddressInput, Field, PermissionIdInput, toOpts } from '../ui'
-
-// Active permission default: all common ops incl. Stake 2.0, excluding AccountPermissionUpdate (46).
-const DEFAULT_OPS = '7fff1fc0033ec30f000000000000000000000000000000000000000000000000'
+import { DEFAULT_OPS } from '../../../shared/operations'
+import { OperationsEditor } from './OperationsEditor'
 
 interface Props {
   from: PublicKey
@@ -141,13 +140,10 @@ function PermEditor({
         </Field>
       </div>
       {perm.type === 2 && (
-        <Field label="Operations (hex bitmask)">
-          <input
-            className="mono"
-            value={perm.operations ?? ''}
-            onChange={(e) => onChange({ ...perm, operations: e.target.value.trim() })}
-          />
-        </Field>
+        <OperationsEditor
+          value={perm.operations ?? DEFAULT_OPS}
+          onChange={(operations) => onChange({ ...perm, operations })}
+        />
       )}
       {perm.keys.map((k, i) => (
         <div key={i} className="row key-row">
