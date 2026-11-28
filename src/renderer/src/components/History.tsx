@@ -1,46 +1,49 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Balances, BalancePoint, HistoryData, HistoryItem, HistoryKind, NetworkId, PublicKey } from '../../../shared/types'
+import type {
+  Balances,
+  BalancePoint,
+  HistoryItem,
+  HistoryKind,
+  HistoryQueryResult,
+  NetworkId,
+  PublicKey
+} from '../../../shared/types'
 import { fmt, short } from '../ui'
 import { Bars, LineChart } from './history/charts'
 import { FEE_PARTS, typeLabel, typeOrder, type FeeSplit } from '../../../shared/txtypes'
-import {
-  EMPTY_FILTERS,
-  RANGES,
-  applyFilters,
-  dayList,
-  feeBuckets,
-  inRange,
-  kindCounts,
-  mergeFeeds,
-  totals,
-  usdtSeries,
-  dayKey,
-  type Filters,
-  type RangeId
-} from './history/data'
+import { EMPTY_FILTERS, RANGES, dayKey, totals, type Filters, type RangeId, type Totals } from '../../../shared/historyData'
 
 const ARROW: Record<HistoryItem['direction'], string> = { in: '←', out: '→', self: '↺', other: '·' }
 const when = (ms: number) =>
   new Date(ms).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })
 
-const ROWS_STEP = 200
+const PAGE_SIZE = 100
+const EMPTY_TOTALS = totals([])
 
 /**
- * History from the local SQLite cache: shows what is cached immediately, then syncs in the background
- * (new txs + continue loading older ones) and refreshes as rows arrive.
+ * History from the local SQLite cache. The main process keeps the processed history and answers queries
+ * (range + filters + one page + totals / chart data), so the renderer only ever holds one page.
+ * After showing the cache it syncs in the background (new txs + older ones) and re-queries as rows arrive.
  */
-function useHistoryCache(address: string, network: NetworkId) {
-  const [data, setData] = useState<HistoryData>()
+function useHistory(address: string, network: NetworkId, query: { days: number; filters: Filters; page: number; usdtBalance: number | null }) {
+  const [res, setRes] = useState<HistoryQueryResult>()
   const [syncing, setSyncing] = useState(false)
   const [added, setAdded] = useState({ new: 0, older: 0 })
   const [error, setError] = useState<string>()
   const current = useRef(`${network}:${address}`)
   current.current = `${network}:${address}`
+  const queryRef = useRef(query)
+  queryRef.current = query
 
   const load = async () => {
     const key = `${network}:${address}`
-    const d = await window.api.historyData(address)
-    if (current.current === key) setData(d)
+    const q = queryRef.current
+    try {
+      const r = await window.api.historyQuery(address, { ...q, pageSize: PAGE_SIZE })
+      if (current.current === key) setRes(r)
+    } catch (e: any) {
+      if (current.current === key) setError(e.message)
+    }
   }
 
   const sync = async () => {
@@ -60,12 +63,24 @@ function useHistoryCache(address: string, network: NetworkId) {
     }
   }
 
+  // new account / network: show the cache, then sync
   useEffect(() => {
-    setData(undefined)
+    setRes(undefined)
     load().then(sync)
   }, [address, network])
 
-  // progress events: count rows and re-read the cache every ~2 s so new rows show up while syncing
+  // range / filters / page changed: re-query (search is debounced by the caller)
+  const qKey = JSON.stringify(query)
+  const first = useRef(true)
+  useEffect(() => {
+    if (first.current) {
+      first.current = false
+      return
+    }
+    load()
+  }, [qKey])
+
+  // progress events: count rows and re-query at most every ~2 s while syncing
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined
     const off = window.api.onHistoryProgress((p) => {
@@ -100,7 +115,7 @@ function useHistoryCache(address: string, network: NetworkId) {
   }, [address, network])
 
   return {
-    data,
+    res,
     syncing,
     added,
     error,
@@ -108,7 +123,7 @@ function useHistoryCache(address: string, network: NetworkId) {
     stop: () => window.api.historyStop(address),
     clear: async () => {
       await window.api.historyClear(address)
-      setData(undefined)
+      setRes(undefined)
       await load()
       await sync()
     }
@@ -121,22 +136,37 @@ export function History({ from, keys, network, balances }: {
   network: NetworkId
   balances?: Balances
 }) {
-  const h = useHistoryCache(from.address, network)
-  const items = useMemo(() => (h.data ? mergeFeeds(h.data.all, h.data.tokens) : []), [h.data])
-  const allStatus = h.data?.status.find((x) => x.feed === 'all')
-  const usdtStatus = h.data?.status.find((x) => x.feed === 'usdt')
   const [range, setRange] = useState<RangeId>('90d')
   const [series, setSeries] = useState<'trx' | 'usdt'>('trx')
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS)
-  const [rows, setRows] = useState(ROWS_STEP)
+  const [search, setSearch] = useState('')
+  const [page, setPage] = useState(0)
   const [explorer, setExplorer] = useState('')
   const [trxDaily, setTrxDaily] = useState<{ points: BalancePoint[]; source: string; error?: string }>()
   const days = RANGES.find((r) => r.id === range)!.days
 
+  // typing in search waits a moment before querying
+  useEffect(() => {
+    const t = setTimeout(() => setFilters((f) => (f.search === search ? f : { ...f, search })), 250)
+    return () => clearTimeout(t)
+  }, [search])
+  // a new range / filter starts at the first page
+  useEffect(() => setPage(0), [filters, range, from.address])
+
+  const h = useHistory(from.address, network, { days, filters, page, usdtBalance: balances?.usdt ?? null })
+  const res = h.res
+  const allStatus = res?.status.find((x) => x.feed === 'all')
+  const t: Totals = res?.totals ?? EMPTY_TOTALS
+  const buckets = res?.buckets ?? []
+  const weekly = res?.weekly ?? days > 120
+  const counts = useMemo(() => new Map(res?.counts ?? []), [res])
+  const rangeTotal = res?.rangeTotal ?? 0
+  const total = res?.total ?? 0
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+
   useEffect(() => {
     window.api.explorerUrl('').then(setExplorer)
   }, [network])
-  useEffect(() => setRows(ROWS_STEP), [filters, range, from.address])
 
   // daily TRX balance from Tronscan for the selected range
   useEffect(() => {
@@ -155,33 +185,18 @@ export function History({ from, keys, network, balances }: {
     () => new Map(keys.map((k) => [k.address, `#${k.id}${k.label ? ` ${k.label}` : ''}`])),
     [keys]
   )
-  const ranged = useMemo(() => inRange(items, days), [items, days])
-  const counts = useMemo(() => kindCounts(ranged), [ranged])
-  const filtered = useMemo(() => applyFilters(ranged, filters, labels), [ranged, filters, labels])
-  const t = useMemo(() => totals(filtered), [filtered])
-  const dayKeys = useMemo(() => dayList(days), [days])
-  const buckets = useMemo(() => feeBuckets(filtered, dayKeys), [filtered, dayKeys])
 
-  // balance series: TRX from Tronscan (cached per day); USDT rebuilt from the cached official USDT transfers
-  const usdtCount = useMemo(() => (h.data ? h.data.tokens.filter((x) => x.isUsdt).length : 0), [h.data])
-  const usdtPoints = useMemo(() => {
-    if (!h.data || !usdtStatus || balances?.usdt == null) return []
-    const all = usdtSeries(h.data.tokens, balances.usdt, dayKeys)
-    // until the USDT feed is fully cached, only days after its oldest cached transfer are exact
-    return usdtStatus.complete || usdtStatus.oldest === undefined ? all : all.filter((p) => p.day >= dayKey(usdtStatus.oldest!))
-  }, [h.data, usdtStatus, balances?.usdt, dayKeys])
-  const usdtCut = !!usdtStatus && !usdtStatus.complete && usdtStatus.oldest !== undefined && usdtPoints.length < dayKeys.length
+  // balance series: TRX from Tronscan (cached per day); USDT rebuilt in the main process from cached USDT transfers
+  const usdtPoints = res?.usdt.points ?? []
+  const usdtCount = res?.usdt.count ?? 0
+  const usdtCut = !!res?.usdt.cutFrom
   const points = series === 'trx' ? (trxDaily?.points.map((p) => ({ day: p.day, value: p.trx })) ?? []) : usdtPoints
   const first = points[0]?.value ?? 0
   const last = points[points.length - 1]?.value ?? 0
   const change = last - first
 
   const toggleKind = (k: HistoryKind) =>
-    setFilters((f) => {
-      const kinds = new Set(f.kinds)
-      kinds.has(k) ? kinds.delete(k) : kinds.add(k)
-      return { ...f, kinds }
-    })
+    setFilters((f) => ({ ...f, kinds: f.kinds.includes(k) ? f.kinds.filter((x) => x !== k) : [...f.kinds, k] }))
 
   return (
     <div className="form history">
@@ -196,15 +211,15 @@ export function History({ from, keys, network, balances }: {
         </nav>
         <span className="spacer" />
         <span className="muted small">
-          {fmt(items.length, 0)} txs cached
+          {fmt(res?.cachedTotal ?? 0, 0)} txs cached
           {allStatus?.complete
             ? ' · complete'
             : allStatus?.oldest !== undefined && ` · back to ${dayKey(allStatus.oldest)}`}
           {h.syncing
             ? ` · syncing${h.added.new ? ` +${fmt(h.added.new, 0)} new` : ''}${h.added.older ? ` +${fmt(h.added.older, 0)} older` : ''}…`
             : allStatus?.syncedAt && ` · synced ${new Date(allStatus.syncedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`}
-          {h.data?.source && ` · ${h.data.source.host}`}
-          {h.data?.source?.fallback && ' (active node has no history API)'}
+          {res?.source && ` · ${res.source.host}`}
+          {res?.source?.fallback && ' (active node has no history API)'}
         </span>
         {h.syncing ? (
           <button className="ghost" onClick={h.stop}>
@@ -212,7 +227,7 @@ export function History({ from, keys, network, balances }: {
           </button>
         ) : (
           <>
-            {h.data && !h.data.status.every((x) => x.complete) && (
+            {res && !res.status.every((x) => x.complete) && (
               <button className="ghost" onClick={h.sync} title="Continue loading older transactions">
                 load older
               </button>
@@ -223,7 +238,7 @@ export function History({ from, keys, network, balances }: {
             <button
               className="ghost"
               onClick={h.clear}
-              title={`Delete this address's cached history (${h.data?.path ?? 'cache.sqlite'}) and download it again`}
+              title={`Delete this address's cached history (${res?.path ?? 'cache.sqlite'}) and download it again`}
             >
               clear cache
             </button>
@@ -259,8 +274,8 @@ export function History({ from, keys, network, balances }: {
         </div>
         {series === 'trx' && !trxDaily && <div className="chart-empty muted">loading daily balance from Tronscan…</div>}
         {series === 'trx' && trxDaily?.error && <div className="chart-empty error">{trxDaily.error}</div>}
-        {series === 'usdt' && !h.data && <div className="chart-empty muted">reading cache…</div>}
-        {series === 'usdt' && h.data && balances?.usdt == null && (
+        {series === 'usdt' && !res && <div className="chart-empty muted">reading cache…</div>}
+        {series === 'usdt' && res && balances?.usdt == null && (
           <div className="chart-empty muted">no USDT balance for this network</div>
         )}
         {points.length > 0 && <LineChart points={points} unit={series} label={`${series} balance per day`} />}
@@ -268,7 +283,7 @@ export function History({ from, keys, network, balances }: {
           {series === 'trx'
             ? `daily balance (end of day, UTC) from ${trxDaily?.source || 'Tronscan'}`
             : usdtCut
-              ? `usdt balance shown from ${dayKey(usdtStatus!.oldest!)}: older usdt transfers are not cached yet${h.syncing ? ' (syncing…)' : ' — use "load older"'}`
+              ? `usdt balance shown from ${res!.usdt.cutFrom}: older usdt transfers are not cached yet${h.syncing ? ' (syncing…)' : ' — use "load older"'}`
               : `rebuilt from ${fmt(usdtCount, 0)} cached usdt transfers back from today's balance`}
         </div>
       </section>
@@ -299,9 +314,9 @@ export function History({ from, keys, network, balances }: {
 
       <section className="panel">
         <div className="panel-head">
-          <span className="panel-title">fees burned per {dayKeys.length > 120 ? 'week' : 'day'}</span>
+          <span className="panel-title">fees burned per {weekly ? 'week' : 'day'}</span>
           <span className="spacer" />
-          <span className="muted small">txs sent by this address{filters.kinds.size ? ', filtered' : ''}</span>
+          <span className="muted small">txs sent by this address{filters.kinds.length ? ', filtered' : ''}</span>
         </div>
         <Bars
           buckets={buckets.map((b) => ({ key: b.key, start: b.start, value: b.fee }))}
@@ -311,7 +326,7 @@ export function History({ from, keys, network, balances }: {
             return (
               <>
                 <div className="muted">
-                  {dayKeys.length > 120 ? 'week of ' : ''}
+                  {weekly ? 'week of ' : ''}
                   {b.start}
                 </div>
                 <b>{fmt(b.fee, 4)} trx</b>
@@ -331,15 +346,15 @@ export function History({ from, keys, network, balances }: {
       <div className="filters">
         <div className="chips">
           <button
-            className={`chip ${filters.kinds.size === 0 ? 'on' : ''}`}
-            onClick={() => setFilters((f) => ({ ...f, kinds: new Set() }))}
+            className={`chip ${filters.kinds.length === 0 ? 'on' : ''}`}
+            onClick={() => setFilters((f) => ({ ...f, kinds: [] }))}
           >
-            all <span className="count">{ranged.length}</span>
+            all <span className="count">{rangeTotal}</span>
           </button>
           {[...counts.keys()]
             .sort((a, b) => typeOrder(a) - typeOrder(b) || a.localeCompare(b))
             .map((k) => (
-            <button key={k} className={`chip ${filters.kinds.has(k) ? 'on' : ''}`} onClick={() => toggleKind(k)}>
+            <button key={k} className={`chip ${filters.kinds.includes(k) ? 'on' : ''}`} onClick={() => toggleKind(k)}>
               {typeLabel(k)} <span className="count">{counts.get(k)}</span>
             </button>
           ))}
@@ -362,24 +377,30 @@ export function History({ from, keys, network, balances }: {
           <input
             className="search"
             placeholder="search txid, address, note, #id…"
-            value={filters.search}
-            onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
           />
-          {(filters.kinds.size > 0 || filters.direction !== 'all' || filters.result !== 'all' || filters.search) && (
-            <button className="link" onClick={() => setFilters(EMPTY_FILTERS)}>
+          {(filters.kinds.length > 0 || filters.direction !== 'all' || filters.result !== 'all' || search) && (
+            <button
+              className="link"
+              onClick={() => {
+                setSearch('')
+                setFilters(EMPTY_FILTERS)
+              }}
+            >
               clear filters
             </button>
           )}
           <span className="spacer" />
           <span className="muted small">
-            {fmt(filtered.length, 0)} of {fmt(ranged.length, 0)} txs
+            {fmt(total, 0)} of {fmt(rangeTotal, 0)} txs
           </span>
         </div>
       </div>
 
       {/* table */}
-      {h.data && !h.syncing && filtered.length === 0 && <div className="muted">No transactions match.</div>}
-      {filtered.length > 0 && (
+      {res && !h.syncing && total === 0 && <div className="muted">No transactions match.</div>}
+      {res && res.rows.length > 0 && (
         <div className="table-scroll">
           <table className="nodes hist">
             <thead>
@@ -395,7 +416,7 @@ export function History({ from, keys, network, balances }: {
               </tr>
             </thead>
             <tbody>
-              {filtered.slice(0, rows).map((x) => (
+              {res.rows.map((x) => (
                 <tr key={x.txid + x.type}>
                   <td className="nowrap muted">{when(x.time)}</td>
                   <td>
@@ -443,10 +464,23 @@ export function History({ from, keys, network, balances }: {
           </table>
         </div>
       )}
-      {filtered.length > rows && (
-        <div className="row">
-          <button onClick={() => setRows((r) => r + ROWS_STEP)}>
-            show more ({fmt(filtered.length - rows, 0)} left)
+      {total > PAGE_SIZE && (
+        <div className="pager">
+          <button className="ghost" disabled={page === 0} onClick={() => setPage(0)}>
+            first
+          </button>
+          <button className="ghost" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
+            ← prev
+          </button>
+          <span className="muted">
+            {fmt(page * PAGE_SIZE + 1, 0)}–{fmt(Math.min(total, (page + 1) * PAGE_SIZE), 0)} of {fmt(total, 0)} · page{' '}
+            {page + 1}/{pages}
+          </span>
+          <button className="ghost" disabled={page >= pages - 1} onClick={() => setPage((p) => p + 1)}>
+            next →
+          </button>
+          <button className="ghost" disabled={page >= pages - 1} onClick={() => setPage(pages - 1)}>
+            last
           </button>
         </div>
       )}
@@ -471,7 +505,7 @@ function feeLines(f: FeeSplit): [string, number][] {
 }
 
 /** Fees burned by cause: resource shortage (bandwidth, energy) vs fixed fees (account creation, memo, …). */
-function FeesPanel({ t }: { t: ReturnType<typeof totals> }) {
+function FeesPanel({ t }: { t: Totals }) {
   const row = (key: keyof FeeSplit, indent = false) => {
     const part = FEE_PARTS.find((p) => p.key === key)!
     const v = t.fees[key]

@@ -1,6 +1,6 @@
 // Pure helpers for the history tab: merging feeds, ranges, totals and chart series. No React, easy to test.
-import type { HistoryItem, HistoryKind } from '../../../../shared/types'
-import { ZERO_FEES, type FeeSplit } from '../../../../shared/txtypes'
+import type { HistoryItem, HistoryKind } from './types'
+import { ZERO_FEES, type FeeSplit } from './txtypes'
 
 export const DAY = 86_400_000
 
@@ -48,13 +48,14 @@ export function mergeFeeds(all: HistoryItem[], trc20: HistoryItem[]): HistoryIte
 }
 
 export interface Filters {
-  kinds: Set<HistoryKind>
+  /** tx type keys; empty = all */
+  kinds: HistoryKind[]
   direction: 'all' | 'in' | 'out'
   result: 'all' | 'success' | 'failed'
   search: string
 }
 
-export const EMPTY_FILTERS: Filters = { kinds: new Set(), direction: 'all', result: 'all', search: '' }
+export const EMPTY_FILTERS: Filters = { kinds: [], direction: 'all', result: 'all', search: '' }
 
 export function inRange(items: HistoryItem[], days: number, now = Date.now()): HistoryItem[] {
   const from = now - days * DAY
@@ -64,8 +65,9 @@ export function inRange(items: HistoryItem[], days: number, now = Date.now()): H
 /** labels: extra searchable text per address (your key ids / labels) */
 export function applyFilters(items: HistoryItem[], f: Filters, labels: Map<string, string>): HistoryItem[] {
   const q = f.search.trim().toLowerCase()
+  const kinds = new Set(f.kinds)
   return items.filter((x) => {
-    if (f.kinds.size && !f.kinds.has(x.kind)) return false
+    if (kinds.size && !kinds.has(x.kind)) return false
     if (f.direction === 'in' && x.direction !== 'in') return false
     if (f.direction === 'out' && x.direction !== 'out') return false
     if (f.result === 'success' && x.result !== 'SUCCESS') return false

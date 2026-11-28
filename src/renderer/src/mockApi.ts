@@ -1,6 +1,7 @@
 // Dev-only fake API for previewing the UI in a browser. Never used inside Electron.
 import type { Balances, MnemonicInfo, NetworkId, NodeState, PublicKey, VaultStatus } from '../../shared/types'
 import { DEFAULT_OPS } from '../../shared/operations'
+import { applyFilters, dayKey, dayList, feeBuckets, inRange, kindCounts, mergeFeeds, totals, usdtSeries } from '../../shared/historyData'
 
 const fileKeys: PublicKey[] = [
   { id: 1, address: 'TXyZjVcYurrbE43b2MfMtN34uA3tJL85zy', source: 'file', canSign: true },
@@ -264,16 +265,27 @@ export function installMockApi() {
     rewardInfo: () => wait({ claimable: 12.483921, lastClaim: Date.now() - 3 * 86400e3, nextClaim: Date.now() - 2 * 86400e3 }),
     claimRewards: plainTx,
     txReceipt: () => wait({ found: true, result: 'SUCCESS', feeTrx: 0.345, energy: 13045, bandwidth: 345, block: 70485000 }),
-    historyData: () => {
-      const st = (feed: string, list: any[]) => ({
+    historyQuery: (_a: string, q: any) => {
+      const merged = mergeFeeds(mockAll, mockTrc20)
+      const ranged = inRange(merged, q.days)
+      const filtered = applyFilters(ranged, q.filters, new Map())
+      const days = dayList(q.days)
+      const pages = Math.max(1, Math.ceil(filtered.length / q.pageSize))
+      const page = Math.min(q.page, pages - 1)
+      const usdtFrom = dayKey(Date.now() - 40 * 864e5)
+      const pts = q.usdtBalance == null ? [] : usdtSeries(mockTrc20, q.usdtBalance, days)
+      const status = (feed: string, list: any[]) => ({
         feed, count: list.length, complete: feed !== 'usdt', syncedAt: Date.now() - 60e3,
         newest: list[0]?.time, oldest: feed === 'usdt' ? Date.now() - 40 * 864e5 : list[list.length - 1]?.time
       })
       return wait({
-        all: mockAll, tokens: mockTrc20,
-        status: [st('all', mockAll), st('trc20', mockTrc20), st('usdt', mockTrc20.filter((x) => x.isUsdt))],
+        rows: filtered.slice(page * q.pageSize, (page + 1) * q.pageSize),
+        page, pageSize: q.pageSize, total: filtered.length, rangeTotal: ranged.length, cachedTotal: merged.length,
+        counts: [...kindCounts(ranged)], totals: totals(filtered), buckets: feeBuckets(filtered, days), weekly: days.length > 120,
+        usdt: { points: usdtFrom > days[0] ? pts.filter((p) => p.day >= usdtFrom) : pts, count: mockTrc20.filter((x) => x.isUsdt).length, cutFrom: usdtFrom > days[0] ? usdtFrom : undefined },
+        status: [status('all', mockAll), status('trc20', mockTrc20), status('usdt', mockTrc20.filter((x) => x.isUsdt))],
         syncing: false, source: { host: 'api.shasta.trongrid.io', fallback: false }, path: '/Users/you/projects/tron_wallet/cache.sqlite'
-      }, 120)
+      }, 80)
     },
     historySync: () => wait([], 1200),
     historyStop: () => wait(undefined),

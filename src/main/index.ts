@@ -97,7 +97,7 @@ app.whenReady().then(() => {
   handle('rewardInfo', tron.rewardInfo)
   handle('claimRewards', tron.claimRewards)
   handle('liveSet', live.setLive)
-  handle('historyData', historyCache.historyData)
+  handle('historyQuery', historyCache.historyQuery)
   handle('historySync', historyCache.syncHistory)
   handle('historyStop', historyCache.stopHistorySync)
   handle('historyClear', historyCache.clearHistory)

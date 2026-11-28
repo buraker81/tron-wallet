@@ -16,7 +16,9 @@ import { dirname, join } from 'node:path'
 import { keysPath } from './key'
 import { getNetwork } from './client'
 import { balanceHistory as fetchBalanceHistory, fetchRaw, processRows, rowTime, rowUid, type Feed } from './history'
-import type { BalanceHistory, HistoryData, HistoryFeedStatus, HistoryItem } from '../shared/types'
+import { listKeys } from './key'
+import { applyFilters, dayList, feeBuckets, inRange, kindCounts, mergeFeeds, totals, usdtSeries } from '../shared/historyData'
+import type { BalanceHistory, HistoryFeedStatus, HistoryItem, HistoryQuery, HistoryQueryResult } from '../shared/types'
 
 const FEEDS: Feed[] = ['all', 'trc20', 'usdt']
 /** rows fetched per backfill run and feed (the USDT feed gets more: the USDT chart needs its whole range) */
@@ -81,18 +83,26 @@ function saveState(network: string, address: string, s: HistoryFeedStatus): void
     .run(network, address, s.feed, s.newest ?? null, s.oldest ?? null, s.complete ? 1 : 0, s.syncedAt ?? null)
 }
 
-/** Insert rows, ignoring ones already stored. Returns how many were new and the time span of the page. */
-function insert(network: string, address: string, feed: Feed, rows: any[]): { added: number; min?: number; max?: number } {
+/** Insert rows, ignoring ones already stored. Returns the new rows and the time span of the page. */
+function insert(
+  network: string,
+  address: string,
+  feed: Feed,
+  rows: any[]
+): { added: number; fresh: any[]; min?: number; max?: number } {
   const d = open()
   const stmt = d.prepare('INSERT OR IGNORE INTO rows (network, address, feed, uid, time, raw) VALUES (?, ?, ?, ?, ?, ?)')
   let added = 0
+  const fresh: any[] = []
   let min: number | undefined
   let max: number | undefined
   d.exec('BEGIN')
   try {
     for (const r of rows) {
       const t = rowTime(feed, r)
-      added += Number(stmt.run(network, address, feed, rowUid(feed, r), t, JSON.stringify(r)).changes)
+      const n = Number(stmt.run(network, address, feed, rowUid(feed, r), t, JSON.stringify(r)).changes)
+      added += n
+      if (n) fresh.push(r)
       min = min === undefined ? t : Math.min(min, t)
       max = max === undefined ? t : Math.max(max, t)
     }
@@ -101,7 +111,8 @@ function insert(network: string, address: string, feed: Feed, rows: any[]): { ad
     d.exec('ROLLBACK')
     throw e
   }
-  return { added, min, max }
+  if (fresh.length) void addToAccount(network, address, feed, fresh)
+  return { added, fresh, min, max }
 }
 
 // ---------- sync ----------
@@ -184,29 +195,120 @@ export function stopHistorySync(address: string): void {
   if (job) job.stop = true
 }
 
-// ---------- read ----------
+// ---------- read: in-memory account cache + queries ----------
 
 /**
- * Cached history of an account, processed into items. `tokens` is the union of the TRC20 and USDT feeds
- * (deduplicated), so token rows are complete as far back as either feed reaches.
+ * Processed items of an account, kept once in memory (main process) and updated incrementally as sync inserts rows,
+ * so a query never re-parses the whole history. Only the page and the aggregates go to the renderer.
+ * A few accounts are kept (LRU); others are reloaded from SQLite when needed.
  */
-export async function historyData(address: string): Promise<HistoryData> {
+interface Account {
+  all: Map<string, HistoryItem>
+  tokens: Map<string, HistoryItem>
+  /** merged + sorted view, rebuilt lazily after changes */
+  merged?: HistoryItem[]
+}
+const MAX_ACCOUNTS = 3
+const accounts = new Map<string, Account>()
+const loading = new Map<string, Promise<Account>>()
+
+async function account(network: string, address: string): Promise<Account> {
+  const key = `${network}:${address}`
+  const hit = accounts.get(key)
+  if (hit) {
+    accounts.delete(key) // refresh LRU position
+    accounts.set(key, hit)
+    return hit
+  }
+  const pending = loading.get(key)
+  if (pending) return pending
+  const p = (async () => {
+    const d = open()
+    const read = (feed: Feed) =>
+      d.prepare('SELECT uid, raw FROM rows WHERE network=? AND address=? AND feed=?').all(network, address, feed) as any[]
+    const acc: Account = { all: new Map(), tokens: new Map() }
+    const allRows = read('all')
+    const allItems = await processRows(address, 'all', allRows.map((r) => JSON.parse(r.raw)))
+    allRows.forEach((r, i) => acc.all.set(r.uid, allItems[i]))
+    for (const feed of ['trc20', 'usdt'] as Feed[]) {
+      const rows = read(feed)
+      const items = await processRows(address, feed, rows.map((r) => JSON.parse(r.raw)))
+      rows.forEach((r, i) => acc.tokens.set(r.uid, items[i]))
+    }
+    accounts.set(key, acc)
+    while (accounts.size > MAX_ACCOUNTS) accounts.delete(accounts.keys().next().value!)
+    return acc
+  })()
+  loading.set(key, p)
+  try {
+    return await p
+  } finally {
+    loading.delete(key)
+  }
+}
+
+/** Process just the newly inserted rows into a loaded account (no-op when the account isn't in memory). */
+async function addToAccount(network: string, address: string, feed: Feed, rows: any[]): Promise<void> {
+  const acc = accounts.get(`${network}:${address}`)
+  if (!acc) return
+  const items = await processRows(address, feed, rows)
+  const target = feed === 'all' ? acc.all : acc.tokens
+  rows.forEach((r, i) => target.set(rowUid(feed, r), items[i]))
+  acc.merged = undefined
+}
+
+function keyLabels(): Map<string, string> {
+  try {
+    return new Map(listKeys().map((k) => [k.address, `#${k.id}${k.label ? ` ${k.label}` : ''}`]))
+  } catch {
+    return new Map()
+  }
+}
+
+/** One page of the account's history plus everything the history tab shows for the range and filters. */
+export async function historyQuery(address: string, q: HistoryQuery): Promise<HistoryQueryResult> {
   const network = getNetwork()
-  const d = open()
-  const read = (feed: Feed) =>
-    (d.prepare('SELECT uid, raw FROM rows WHERE network=? AND address=? AND feed=? ORDER BY time DESC').all(network, address, feed) as any[])
-  const allRows = read('all').map((r) => JSON.parse(r.raw))
-  const tokenRows = new Map<string, any>()
-  for (const feed of ['trc20', 'usdt'] as Feed[]) for (const r of read(feed)) tokenRows.set(r.uid, JSON.parse(r.raw))
-  const [all, tokens] = await Promise.all([
-    processRows(address, 'all', allRows),
-    processRows(address, 'trc20', [...tokenRows.values()])
-  ])
-  tokens.sort((a: HistoryItem, b: HistoryItem) => b.time - a.time)
+  const acc = await account(network, address)
+  acc.merged ??= mergeFeeds([...acc.all.values()], [...acc.tokens.values()])
+  const ranged = inRange(acc.merged, q.days)
+  const filtered = applyFilters(ranged, q.filters, keyLabels())
+  const days = dayList(q.days)
+  const pageSize = Math.max(10, Math.min(500, Math.floor(q.pageSize) || 100))
+  const pages = Math.max(1, Math.ceil(filtered.length / pageSize))
+  const page = Math.max(0, Math.min(pages - 1, Math.floor(q.page) || 0))
+
+  // USDT balance per day, rebuilt from cached USDT transfers; exact only back to the oldest cached one
+  const status = FEEDS.map((f) => state(network, address, f))
+  const usdtStatus = status.find((x) => x.feed === 'usdt')!
+  let usdtPoints: { day: string; value: number }[] = []
+  let cutFrom: string | undefined
+  let usdtCount = 0
+  if (q.usdtBalance != null) {
+    const tokens = [...acc.tokens.values()]
+    usdtCount = tokens.reduce((n, x) => n + (x.isUsdt ? 1 : 0), 0)
+    usdtPoints = usdtSeries(tokens, q.usdtBalance, days)
+    if (!usdtStatus.complete && usdtStatus.oldest !== undefined) {
+      const from = dayKey(usdtStatus.oldest)
+      if (from > days[0]) {
+        cutFrom = from
+        usdtPoints = usdtPoints.filter((p) => p.day >= from)
+      }
+    }
+  }
+
   return {
-    all,
-    tokens,
-    status: FEEDS.map((f) => state(network, address, f)),
+    rows: filtered.slice(page * pageSize, (page + 1) * pageSize),
+    page,
+    pageSize,
+    total: filtered.length,
+    rangeTotal: ranged.length,
+    cachedTotal: acc.merged.length,
+    counts: [...kindCounts(ranged)],
+    totals: totals(filtered),
+    buckets: feeBuckets(filtered, days),
+    weekly: days.length > 120,
+    usdt: { points: usdtPoints, count: usdtCount, cutFrom },
+    status,
     syncing: running.has(`${network}:${address}`),
     source: lastSource,
     path: cachePath()
@@ -217,6 +319,7 @@ export async function historyData(address: string): Promise<HistoryData> {
 export function clearHistory(address: string): void {
   stopHistorySync(address)
   const network = getNetwork()
+  accounts.delete(`${network}:${address}`)
   const d = open()
   for (const t of ['rows', 'sync', 'balance_days', 'balance_sync']) {
     d.prepare(`DELETE FROM ${t} WHERE network=? AND address=?`).run(network, address)

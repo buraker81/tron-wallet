@@ -58,6 +58,9 @@ Preview the UI in a normal browser with fake data: run `npm run dev` and open `h
     once. Raw API rows are stored and turned into items when read, so fee / type rules can change without re-downloading.
     Past daily balances are cached too (today is refreshed). *clear cache* deletes one address's cache. Set
     `CACHE_FILE` to use another path.
+  - the main process keeps each open account's processed history in memory once (a few accounts, LRU), adds newly
+    synced rows incrementally, and answers queries (range, filters, totals, chart data, one page of rows); the table is
+    paginated (100 rows per page), so the UI never holds the whole history
   - the transaction feed is merged with the TRC20 feed (your own TRC20 sends become one row with the token amount
     and the fees)
   - range `30d · 90d · 1y · all` for everything below

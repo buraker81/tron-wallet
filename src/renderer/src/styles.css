@@ -376,3 +376,7 @@ input.search { width: 280px; }
 @keyframes addr-flash { 0% { background: var(--warn-bg); } 100% { background: transparent; } }
 .addr-list li.sel.flash { animation: none; }
 @media (prefers-reduced-motion: reduce) { .live-toggle.on .live-dot, .addr-list li.flash { animation: none; } }
+
+/* ---------- history pager ---------- */
+.pager { display: flex; align-items: center; gap: 10px; justify-content: flex-end; }
+.pager .muted { font-variant-numeric: tabular-nums; }

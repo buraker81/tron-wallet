@@ -1,4 +1,5 @@
 import type { FeeSplit } from './txtypes'
+import type { FeeBucket, Filters, Totals } from './historyData'
 
 export type NetworkId = 'shasta' | 'nile' | 'mainnet'
 export type Resource = 'ENERGY' | 'BANDWIDTH'
@@ -221,11 +222,33 @@ export interface HistoryFeedStatus {
   syncedAt?: number
 }
 
-export interface HistoryData {
-  /** tx feed, newest first */
-  all: HistoryItem[]
-  /** TRC20 transfers (all tokens + the USDT-only feed, deduplicated), newest first */
-  tokens: HistoryItem[]
+/** What the history tab asks for: range, filters and one page. Everything is computed in the main process. */
+export interface HistoryQuery {
+  days: number
+  filters: Filters
+  page: number
+  pageSize: number
+  /** current USDT balance (for rebuilding the daily USDT series); null when the network has none */
+  usdtBalance: number | null
+}
+
+export interface HistoryQueryResult {
+  /** the requested page of the filtered rows, newest first */
+  rows: HistoryItem[]
+  page: number
+  pageSize: number
+  /** rows matching range + filters */
+  total: number
+  /** rows in the range (before filters) */
+  rangeTotal: number
+  /** rows cached for the account */
+  cachedTotal: number
+  /** tx type counts in the range (for the filter chips) */
+  counts: [string, number][]
+  totals: Totals
+  buckets: FeeBucket[]
+  weekly: boolean
+  usdt: { points: { day: string; value: number }[]; count: number; cutFrom?: string }
   status: HistoryFeedStatus[]
   syncing: boolean
   source?: { host: string; fallback: boolean }
@@ -360,8 +383,8 @@ export interface Api {
   estimateTx(action: TxAction, id: number, args: unknown[], opts?: TxOptions): Promise<FeeEstimate>
   rewardInfo(address: string): Promise<RewardInfo>
   claimRewards(id: number, opts?: TxOptions): Promise<TxResult>
-  /** cached history (instant) */
-  historyData(address: string): Promise<HistoryData>
+  /** one page of cached history plus totals / chart data for the range and filters (instant, from the cache) */
+  historyQuery(address: string, q: HistoryQuery): Promise<HistoryQueryResult>
   /** fetch new txs and continue loading older ones; resolves when done */
   historySync(address: string): Promise<HistoryFeedStatus[]>
   historyStop(address: string): Promise<void>
